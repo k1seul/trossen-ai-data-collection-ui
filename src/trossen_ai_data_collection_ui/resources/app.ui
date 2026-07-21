@@ -2590,7 +2590,7 @@ COUNT</string>
           </property>
           <property name="font">
            <font>
-            <pointsize>18</pointsize>
+            <pointsize>15</pointsize>
             <bold>true</bold>
            </font>
           </property>
@@ -2690,7 +2690,7 @@ SESSION</string>
           </property>
           <property name="font">
            <font>
-            <pointsize>18</pointsize>
+            <pointsize>15</pointsize>
             <bold>true</bold>
            </font>
           </property>
@@ -2790,7 +2790,7 @@ SESSION</string>
           </property>
           <property name="font">
            <font>
-            <pointsize>18</pointsize>
+            <pointsize>15</pointsize>
             <bold>true</bold>
            </font>
           </property>
@@ -2890,7 +2890,7 @@ EPISODE</string>
           </property>
           <property name="font">
            <font>
-            <pointsize>18</pointsize>
+            <pointsize>15</pointsize>
             <bold>true</bold>
            </font>
           </property>
@@ -2990,7 +2990,7 @@ NEXT</string>
           </property>
           <property name="font">
            <font>
-            <pointsize>18</pointsize>
+            <pointsize>15</pointsize>
             <bold>true</bold>
            </font>
           </property>
@@ -3033,7 +3033,7 @@ NEXT</string>
           </property>
           <property name="font">
            <font>
-            <pointsize>18</pointsize>
+            <pointsize>15</pointsize>
             <bold>true</bold>
            </font>
           </property>

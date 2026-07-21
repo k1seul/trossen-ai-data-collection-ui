@@ -650,7 +650,10 @@ class Ui_MainWindow(object):
         palette6.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette6.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_start_recording.setPalette(palette6)
-        self.pushButton_start_recording.setFont(font1)
+        font6 = QFont()
+        font6.setPointSize(15)
+        font6.setBold(True)
+        self.pushButton_start_recording.setFont(font6)
 
         self.horizontalLayout_3.addWidget(self.pushButton_start_recording)
 
@@ -671,7 +674,7 @@ class Ui_MainWindow(object):
         palette7.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette7.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_stop_recording.setPalette(palette7)
-        self.pushButton_stop_recording.setFont(font1)
+        self.pushButton_stop_recording.setFont(font6)
 
         self.horizontalLayout_3.addWidget(self.pushButton_stop_recording)
 
@@ -692,7 +695,7 @@ class Ui_MainWindow(object):
         palette8.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette8.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_rerecord.setPalette(palette8)
-        self.pushButton_rerecord.setFont(font1)
+        self.pushButton_rerecord.setFont(font6)
 
         self.horizontalLayout_3.addWidget(self.pushButton_rerecord)
 
@@ -713,7 +716,7 @@ class Ui_MainWindow(object):
         palette9.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette9.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_finish_episode.setPalette(palette9)
-        self.pushButton_finish_episode.setFont(font1)
+        self.pushButton_finish_episode.setFont(font6)
 
         self.horizontalLayout_3.addWidget(self.pushButton_finish_episode)
 
@@ -734,7 +737,7 @@ class Ui_MainWindow(object):
         palette10.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette10.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_fail_episode.setPalette(palette10)
-        self.pushButton_fail_episode.setFont(font1)
+        self.pushButton_fail_episode.setFont(font6)
 
         self.horizontalLayout_3.addWidget(self.pushButton_fail_episode)
 
@@ -752,7 +755,7 @@ class Ui_MainWindow(object):
         self.pushButton_dryrun.setSizePolicy(sizePolicy5)
         self.pushButton_dryrun.setMinimumSize(QSize(150, 150))
         self.pushButton_dryrun.setMaximumSize(QSize(244, 16777215))
-        self.pushButton_dryrun.setFont(font1)
+        self.pushButton_dryrun.setFont(font6)
 
         self.horizontalLayout_3.addWidget(self.pushButton_dryrun)
 
