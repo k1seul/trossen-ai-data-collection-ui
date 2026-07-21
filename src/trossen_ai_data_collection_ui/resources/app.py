@@ -430,6 +430,44 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_2.addWidget(self.comboBox_task_selection)
 
+        self.label_object = QLabel(self.centralwidget)
+        self.label_object.setObjectName(u"label_object")
+        sizePolicy4.setHeightForWidth(self.label_object.sizePolicy().hasHeightForWidth())
+        self.label_object.setSizePolicy(sizePolicy4)
+        self.label_object.setMinimumSize(QSize(0, 40))
+        self.label_object.setMaximumSize(QSize(435, 16777215))
+        font2 = QFont()
+        font2.setPointSize(18)
+        self.label_object.setFont(font2)
+
+        self.verticalLayout_2.addWidget(self.label_object)
+
+        self.comboBox_episode_object = QComboBox(self.centralwidget)
+        self.comboBox_episode_object.setObjectName(u"comboBox_episode_object")
+        self.comboBox_episode_object.setEditable(True)
+        sizePolicy5.setHeightForWidth(self.comboBox_episode_object.sizePolicy().hasHeightForWidth())
+        self.comboBox_episode_object.setSizePolicy(sizePolicy5)
+        self.comboBox_episode_object.setMinimumSize(QSize(0, 60))
+        self.comboBox_episode_object.setMaximumSize(QSize(450, 16777215))
+        font3 = QFont()
+        font3.setPointSize(16)
+        self.comboBox_episode_object.setFont(font3)
+
+        self.verticalLayout_2.addWidget(self.comboBox_episode_object)
+
+        self.label_instruction_preview = QLabel(self.centralwidget)
+        self.label_instruction_preview.setObjectName(u"label_instruction_preview")
+        sizePolicy4.setHeightForWidth(self.label_instruction_preview.sizePolicy().hasHeightForWidth())
+        self.label_instruction_preview.setSizePolicy(sizePolicy4)
+        self.label_instruction_preview.setMaximumSize(QSize(435, 16777215))
+        self.label_instruction_preview.setWordWrap(True)
+        font4 = QFont()
+        font4.setPointSize(12)
+        font4.setItalic(True)
+        self.label_instruction_preview.setFont(font4)
+
+        self.verticalLayout_2.addWidget(self.label_instruction_preview)
+
 
         self.horizontalLayout_2.addLayout(self.verticalLayout_2)
 
@@ -490,10 +528,10 @@ class Ui_MainWindow(object):
         palette3.setBrush(QPalette.Disabled, QPalette.PlaceholderText, brush25)
 #endif
         self.spinBox_episode_count.setPalette(palette3)
-        font2 = QFont()
-        font2.setPointSize(24)
-        font2.setBold(True)
-        self.spinBox_episode_count.setFont(font2)
+        font5 = QFont()
+        font5.setPointSize(24)
+        font5.setBold(True)
+        self.spinBox_episode_count.setFont(font5)
         self.spinBox_episode_count.setFrame(True)
         self.spinBox_episode_count.setAlignment(Qt.AlignCenter)
         self.spinBox_episode_count.setButtonSymbols(QAbstractSpinBox.NoButtons)
@@ -762,6 +800,11 @@ class Ui_MainWindow(object):
         self.comboBox_task_selection.setItemText(1, QCoreApplication.translate("MainWindow", u"Trossen AI Mobile Dummy", None))
         self.comboBox_task_selection.setItemText(2, QCoreApplication.translate("MainWindow", u"Trossen AI Solo Dummy", None))
 
+        self.label_object.setText(QCoreApplication.translate("MainWindow", u"OBJECT / VARIANT", None))
+#if QT_CONFIG(tooltip)
+        self.comboBox_episode_object.setToolTip(QCoreApplication.translate("MainWindow", u"Pick a preset object/variant, or type a custom one. Fills the {object} placeholder in the task's instruction template. Can be changed between episodes without stopping the session.", None))
+#endif // QT_CONFIG(tooltip)
+        self.label_instruction_preview.setText(QCoreApplication.translate("MainWindow", u"Instruction: ", None))
         self.label_2.setText(QCoreApplication.translate("MainWindow", u"EPISODE COUNT", None))
         self.pushButton_episode_count_minus.setText(QCoreApplication.translate("MainWindow", u"-", None))
         self.pushButton_episode_count_plus.setText(QCoreApplication.translate("MainWindow", u"+", None))

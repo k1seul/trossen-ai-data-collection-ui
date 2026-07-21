@@ -56,6 +56,56 @@ Key files:
 - `src/trossen_ai_data_collection_ui/resources/app.ui` / `app.py` — Qt Designer UI + generated code
 - `src/trossen_ai_data_collection_ui/configs/` — default robot/task YAML configs
 
+## Multi-task / multi-object data collection
+
+Recording controls also include two buttons for managing episodes without
+stopping the session:
+
+- **FINISH EPISODE NEXT** — ends the current episode's recording early, saves
+  it, and moves to the next episode.
+- **FAIL EPISODE NEXT** — ends the current episode's recording early,
+  discards the data (unlike RE-RECORD, it is not retried), and moves on.
+
+To collect a family of tasks like "pick up `<object>`" (e.g. "pick up the red
+block", "pick up the blue block") as ONE Hugging Face dataset repo instead of
+one repo per object, use the **OBJECT / VARIANT** field next to the task
+dropdown:
+
+1. In a task's config (`tasks.yaml`), write `task_description` with an
+   `{object}` placeholder and list dropdown presets under `task_objects`:
+
+   ```yaml
+   - task_name: "trossen_ai_stationary_pick_and_place"
+     robot_model: "trossen_ai_stationary"
+     task_description: "Pick up the {object} and place it in the bin."
+     task_objects:
+       - "red block"
+       - "blue block"
+       - "green cup"
+     hf_user: "YourUser"
+     ...
+   ```
+
+2. In the UI, the OBJECT / VARIANT combobox is populated from `task_objects`
+   but stays editable — pick a preset or type any custom value. The label
+   below it previews the exact instruction string that will be recorded.
+3. Between episodes (session keeps running, same dataset), change the
+   object field to switch what gets recorded next — e.g. record a batch of
+   episodes for "red block", then edit the field to "blue block" and keep
+   going. All episodes land in the same repo (`hf_user/task_name`), each
+   tagged with its own instruction, which is exactly how `LeRobotDataset`
+   (`meta/tasks.jsonl`) represents multi-task data — no need to fragment
+   variants across separate repos.
+
+If `task_description` has no `{object}` placeholder, the field/preview are
+simply unused and behavior is identical to the original fixed-instruction UI.
+
+Since `~/.trossen/trossen_ai_data_collection/configs/tasks.yaml` is only
+seeded from this repo's `configs/tasks.yaml` on first run, add the
+`task_objects`/`{object}` fields to your existing persistent `tasks.yaml`
+manually (via the app's `Edit > Task Configuration` menu, or by editing the
+file directly) if you already ran the app before this feature existed.
+
 ## Updating the `lerobot` dependency
 
 `lerobot` is pulled from `Interbotix/lerobot@trossen-ai` via `[tool.uv.sources]`

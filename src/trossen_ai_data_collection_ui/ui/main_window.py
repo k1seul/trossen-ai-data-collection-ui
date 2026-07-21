@@ -475,6 +475,11 @@ class MainWindow(QMainWindow):
 
         self.populate_task_combobox()  # Populate the task selection combobox.
 
+        # Populate the object/variant combobox for the initially selected task, and
+        # keep the live instruction preview in sync as the operator edits/selects it.
+        self.ui.comboBox_episode_object.editTextChanged.connect(self.update_instruction_preview)
+        self.refresh_episode_object_choices()
+
         # Dynamically assign methods to each camera widget.
         self.camera_widgets = [
             self.ui.openGLWidget_camera_0,
@@ -1223,6 +1228,51 @@ class MainWindow(QMainWindow):
         self.selected_task = self.ui.comboBox_task_selection.currentText()
         logger.info(f"Task selection changed to '{self.selected_task}'")
         self.set_logs(f"Selected new task: {self.selected_task}")
+        self.refresh_episode_object_choices()
+
+    def refresh_episode_object_choices(self) -> None:
+        """
+        Repopulate the object/variant combobox for the currently selected task.
+
+        Reads the optional `task_objects` list from the selected task's config
+        (used as dropdown presets, e.g. ["red block", "blue block"]) and updates
+        the live instruction preview to match. The combobox stays editable, so
+        an object not in the preset list can still be typed in freely.
+        """
+        task_config = self.get_task_parameters(self.selected_task) or {}
+        objects = task_config.get("task_objects", []) or []
+
+        self.ui.comboBox_episode_object.blockSignals(True)
+        self.ui.comboBox_episode_object.clear()
+        self.ui.comboBox_episode_object.addItems(objects)
+        self.ui.comboBox_episode_object.setCurrentText(objects[0] if objects else "")
+        self.ui.comboBox_episode_object.blockSignals(False)
+
+        self.update_instruction_preview()
+
+    def get_current_instruction(self) -> str:
+        """
+        Compute the natural-language instruction for the episode about to be recorded.
+
+        If the selected task's `task_description` contains an `{object}` placeholder,
+        it is filled in with the current text of the object/variant combobox (which
+        may be freely edited between episodes). Otherwise the task description is
+        used as-is, unchanged.
+
+        :return: The instruction string to record with the current/next episode.
+        """
+        task_config = self.get_task_parameters(self.selected_task) or {}
+        template = task_config.get("task_description", "No task definition was provided")
+        obj = self.ui.comboBox_episode_object.currentText().strip()
+        if "{object}" in template:
+            return template.replace("{object}", obj)
+        return template
+
+    def update_instruction_preview(self) -> None:
+        """
+        Refresh the on-screen preview of the instruction that will be recorded next.
+        """
+        self.ui.label_instruction_preview.setText(f"Instruction: {self.get_current_instruction()}")
 
     def set_logs(self, logs: str, clear: bool = True) -> None:
         """
@@ -1615,13 +1665,20 @@ class MainWindow(QMainWindow):
                     robot.enable_teleoperation()
 
                 episode_idx = dataset.num_episodes + batched_episodes
+                # Read the instruction live so it can be changed between episodes
+                # (e.g. editing the object combobox from "red block" to "blue block")
+                # without needing to stop and restart the recording session.
+                episode_instruction = self.get_current_instruction()
                 logger.info(
-                    f"Recording episode {episode_idx} ({recorded_episodes + 1}/{cfg.num_episodes})"
+                    f"Recording episode {episode_idx} ({recorded_episodes + 1}/{cfg.num_episodes}): "
+                    f"{episode_instruction}"
                 )
                 log_say(f"Episode {episode_idx}", cfg.play_sounds)
                 self.log_signal.emit(
                     colored(
-                        f"Recording episode {dataset.num_episodes + batched_episodes}", "yellow"
+                        f"Recording episode {dataset.num_episodes + batched_episodes}: "
+                        f"{episode_instruction}",
+                        "yellow",
                     ),
                     False,
                 )
@@ -1641,7 +1698,7 @@ class MainWindow(QMainWindow):
                     events=self.events,
                     policy=policy,
                     fps=cfg.fps,
-                    single_task=cfg.single_task,
+                    single_task=episode_instruction,
                     display_fps=self.display_fps,
                 )
 
