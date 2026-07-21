@@ -1,0 +1,42 @@
+tasks:
+  - task_name: "trossen_ai_solo_dummy"
+    robot_model: "trossen_ai_solo"
+    task_description: "A dummy task for the Trossen AI Solo robot."
+    episode_length_s: 10
+    warmup_time_s: 5
+    reset_time_s: 5
+    hf_user: "YourUser"
+    fps: 30
+    display_fps: 1
+    push_to_hub: false
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  - task_name: "trossen_ai_mobile_dummy"
+    robot_model: "trossen_ai_mobile"
+    task_description: "A dummy task for the Trossen AI Mobile robot."
+    episode_length_s: 10
+    warmup_time_s: 5
+    reset_time_s: 5
+    hf_user: "YourUser"
+    fps: 30
+    display_fps: 1
+    push_to_hub: false
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  - task_name: "trossen_ai_stationary_dummy"
+    robot_model: "trossen_ai_stationary"
+    task_description: "A dummy task for the Trossen AI Stationary robot."
+    episode_length_s: 10
+    warmup_time_s: 5
+    reset_time_s: 5
+    hf_user: "YourUser"
+    fps: 30
+    display_fps: 1
+    push_to_hub: false
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1

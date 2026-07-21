@@ -1,0 +1,116 @@
+trossen_ai_stationary:
+
+  max_relative_target: null
+
+  min_time_to_move_multiplier: 3.0
+
+  camera_interface: 'intel_realsense'
+
+  leader_arms:
+    right:
+      ip: '192.168.1.3'
+      model: 'V0_LEADER'
+    left:
+      ip: '192.168.1.2'
+      model: 'V0_LEADER'
+
+  follower_arms:
+    right:
+      ip: '192.168.1.5'
+      model: 'V0_FOLLOWER'
+    left:
+      ip: '192.168.1.4'
+      model: 'V0_FOLLOWER'
+
+  cameras:
+    cam_high:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
+    cam_low:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
+    cam_right_wrist:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
+    cam_left_wrist:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
+
+trossen_ai_mobile:
+
+  max_relative_target: null
+
+  min_time_to_move_multiplier: 3.0
+
+  camera_interface: 'intel_realsense'
+
+  leader_arms:
+    right:
+      ip: '192.168.1.3'
+      model: 'V0_LEADER'
+    left:
+      ip: '192.168.1.2'
+      model: 'V0_LEADER'
+
+  follower_arms:
+    right:
+      ip: '192.168.1.5'
+      model: 'V0_FOLLOWER'
+    left:
+      ip: '192.168.1.4'
+      model: 'V0_FOLLOWER'
+
+  cameras:
+    cam_high:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
+    cam_right_wrist:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
+    cam_left_wrist:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
+
+trossen_ai_solo:
+
+  max_relative_target: null
+
+  min_time_to_move_multiplier: 3.0
+
+  camera_interface: 'intel_realsense'
+
+  leader_arms:
+    main:
+      ip: '192.168.1.3'
+      model: 'V0_LEADER'
+
+  follower_arms:
+    main:
+      ip: '192.168.1.5'
+      model: 'V0_FOLLOWER'
+
+  cameras:
+    cam_high:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
+    cam_wrist:
+      serial_number: 000123456789
+      width: 640
+      height: 480
+      fps: 30
