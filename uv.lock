@@ -765,7 +765,7 @@ wheels = [
 [[package]]
 name = "lerobot"
 version = "0.1.0"
-source = { git = "https://github.com/Interbotix/lerobot.git?branch=trossen-ai#3f1a6555046b8b56bf59258bab0d1c2d71e0d4a4" }
+source = { git = "https://github.com/Interbotix/lerobot.git?rev=3f1a655#3f1a6555046b8b56bf59258bab0d1c2d71e0d4a4" }
 dependencies = [
     { name = "av" },
     { name = "cmake" },
@@ -1439,12 +1439,12 @@ wheels = [
 
 [[package]]
 name = "pyrealsense2"
-version = "2.58.3.10794"
+version = "2.58.2.10647"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/f1/244876e91225828ed01ddc5c2af2a426509469364195b490e35245dbb20f/pyrealsense2-2.58.3.10794-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:c7e4cd8589981100267415c781ba7ef779274ab9afe27c9d62526cafd27ffe14", size = 12964940, upload-time = "2026-07-19T15:54:34.988Z" },
-    { url = "https://files.pythonhosted.org/packages/d9/95/896134ef114624ade4955f2cad72d35a4e912480ded79d4534e36004a382/pyrealsense2-2.58.3.10794-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:3e82c157def7b772dfb9919e2e2f3e796b91b56fa3272431a757977e7dd7e9d2", size = 6227067, upload-time = "2026-07-19T15:54:38.218Z" },
-    { url = "https://files.pythonhosted.org/packages/8f/de/0a69dccc3737ac54379f439edf1eca3971ddf64891967d1aca2557f0ec94/pyrealsense2-2.58.3.10794-cp310-cp310-win_amd64.whl", hash = "sha256:1bcba9bd912855191452ef686b3078cc2969bffce2bab47a57bab66c2ef517ca", size = 9049735, upload-time = "2026-07-19T15:54:42.091Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/b6/b5e99782708ef826edfb46c88e3bc0f2ef4b89b1b3b9ce32fd55dc47bc0c/pyrealsense2-2.58.2.10647-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:17c429a18ffe0512305df37f78658defa33b9414dccf90a40287010e3cbcfaf4", size = 12847087, upload-time = "2026-06-14T16:58:55.175Z" },
+    { url = "https://files.pythonhosted.org/packages/76/58/edc570d2d0a31ad76a36cc2524c9fceb8f21f90e01f7009367fb5db0cb36/pyrealsense2-2.58.2.10647-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:dccf473f29e6014704c36ff0bb658f7c8a4062c2d416313c93811ea18e150765", size = 6142120, upload-time = "2026-06-14T16:58:58.047Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/bf/59c082f0a4ab7bdab05fe208518bea34f7524586c897f756343ea05a9142/pyrealsense2-2.58.2.10647-cp310-cp310-win_amd64.whl", hash = "sha256:142cc56a9dd5f52a5b33e4c68d27e9f8a8d5511945664f493a6e52ef45871593", size = 8972811, upload-time = "2026-06-14T16:59:00.499Z" },
 ]
 
 [[package]]
@@ -1847,6 +1847,7 @@ name = "trossen-ai-data-collection-ui"
 version = "1.2.2"
 source = { editable = "." }
 dependencies = [
+    { name = "av" },
     { name = "lerobot", extra = ["trossen-ai"] },
     { name = "numpy" },
     { name = "opencv-python" },
@@ -1860,28 +1861,29 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "lerobot", extras = ["trossen-ai"], git = "https://github.com/Interbotix/lerobot.git?branch=trossen-ai" },
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "opencv-python", specifier = ">=4.10" },
-    { name = "pyrealsense2", specifier = ">=2.55.1.6486" },
+    { name = "av", specifier = "==12.3.0" },
+    { name = "lerobot", extras = ["trossen-ai"], git = "https://github.com/Interbotix/lerobot.git?rev=3f1a655" },
+    { name = "numpy", specifier = "==2.2.6" },
+    { name = "opencv-python", specifier = "==4.12.0.88" },
+    { name = "pyrealsense2", specifier = "==2.58.2.10647" },
     { name = "pyside6", specifier = "==6.8.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "termcolor", specifier = ">=2.0" },
-    { name = "trossen-arm", specifier = ">=1.8.0" },
-    { name = "trossen-slate", specifier = ">=0.0.3" },
+    { name = "trossen-arm", specifier = "==1.9.3" },
+    { name = "trossen-slate", specifier = "==0.0.3" },
 ]
 
 [[package]]
 name = "trossen-arm"
-version = "1.11.0"
+version = "1.9.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/a8/c298b54bcf8c25e85087e8f1b4b43636bbcd8f0c70e5624208fe0c54b47b/trossen_arm-1.11.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:3a5b31b42d6491be483e740f9c9aee9bf245d9782f7769ca6f9eaa8ec73df5b5", size = 746128, upload-time = "2026-07-01T23:47:15.224Z" },
-    { url = "https://files.pythonhosted.org/packages/4f/2f/10e8ae1c7c8c9e074fca0fc8727e3cfde279a1a72e896248477aaac9e0f5/trossen_arm-1.11.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:39528d20cb0540d34aa80b757b0198ac5fe261c2729869e663953352def5f037", size = 1156139, upload-time = "2026-07-01T23:47:16.671Z" },
-    { url = "https://files.pythonhosted.org/packages/00/a9/3d1f400653c62c05a4ad62c996f3ddcf25783ba595e89223cd23de14571a/trossen_arm-1.11.0-cp310-cp310-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:032200220c20dcea95e371ef5208378ff622f761865692c5ec6b34dbf07abc0d", size = 978677, upload-time = "2026-07-01T23:47:18.082Z" },
+    { url = "https://files.pythonhosted.org/packages/43/86/54895d6630e057b02d3e4c6f16eb44a140a1d5a60c79056883f1e0d15b15/trossen_arm-1.9.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:00f8050412a96f58c60ec94198dd449bc595181f1357b96d90435953f1d7c35f", size = 832095, upload-time = "2026-04-28T21:01:52.18Z" },
+    { url = "https://files.pythonhosted.org/packages/49/c6/c63e4101f9e94397b3da0e6d302f4330a4013739a6316fefc7237ea3cee7/trossen_arm-1.9.3-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:33b5465bbf0004d7517285e5b0d848fc119428fd16f51302f8bb25d1a0d842ba", size = 1166563, upload-time = "2026-04-28T21:01:53.959Z" },
+    { url = "https://files.pythonhosted.org/packages/48/ff/18c970616fafd2cdba57ecc68af40646ca9e774bc1f661c34bc4a480f2d5/trossen_arm-1.9.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8a8accf97a462a600ab192ec77ad507d4d69d26cfee6124ea45fb032d5a5d38d", size = 1277167, upload-time = "2026-04-28T21:01:55.439Z" },
 ]
 
 [[package]]
