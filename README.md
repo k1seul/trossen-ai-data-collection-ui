@@ -100,6 +100,22 @@ dropdown:
 If `task_description` has no `{object}` placeholder, the field/preview are
 simply unused and behavior is identical to the original fixed-instruction UI.
 
+The OBJECT / VARIANT combobox and the "Recorded so far: ..." label below the
+instruction preview are populated by reading the selected task's dataset
+directly (`~/.cache/huggingface/lerobot/<hf_user>/<task_name>/meta/`, the
+same local cache the recording session writes to) — no separate history
+file is kept. Concretely:
+
+- The dropdown always includes `task_objects` presets, plus every
+  object/variant already recorded for that repo (so you can pick up a
+  variant you used in a previous session instead of retyping it), and stays
+  editable for typing a brand new one.
+- Selecting a task defaults the field to whichever variant was recorded
+  most recently, so an interrupted session can be resumed as-is.
+- The history label shows a live episode count per variant (including
+  presets with 0 so far), updated after every episode saved in the current
+  session.
+
 Since `~/.trossen/trossen_ai_data_collection/configs/tasks.yaml` is only
 seeded from this repo's `configs/tasks.yaml` on first run, add the
 `task_objects`/`{object}` fields to your existing persistent `tasks.yaml`

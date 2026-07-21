@@ -524,6 +524,18 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_2.addWidget(self.label_instruction_preview)
 
+        self.label_task_history = QLabel(self.centralwidget)
+        self.label_task_history.setObjectName(u"label_task_history")
+        sizePolicy4.setHeightForWidth(self.label_task_history.sizePolicy().hasHeightForWidth())
+        self.label_task_history.setSizePolicy(sizePolicy4)
+        self.label_task_history.setMaximumSize(QSize(435, 16777215))
+        self.label_task_history.setWordWrap(True)
+        font5 = QFont()
+        font5.setPointSize(11)
+        self.label_task_history.setFont(font5)
+
+        self.verticalLayout_2.addWidget(self.label_task_history)
+
 
         self.horizontalLayout_2.addLayout(self.verticalLayout_2)
 
@@ -584,10 +596,10 @@ class Ui_MainWindow(object):
         palette4.setBrush(QPalette.Disabled, QPalette.PlaceholderText, brush25)
 #endif
         self.spinBox_episode_count.setPalette(palette4)
-        font5 = QFont()
-        font5.setPointSize(24)
-        font5.setBold(True)
-        self.spinBox_episode_count.setFont(font5)
+        font6 = QFont()
+        font6.setPointSize(24)
+        font6.setBold(True)
+        self.spinBox_episode_count.setFont(font6)
         self.spinBox_episode_count.setFrame(True)
         self.spinBox_episode_count.setAlignment(Qt.AlignCenter)
         self.spinBox_episode_count.setButtonSymbols(QAbstractSpinBox.NoButtons)
@@ -650,10 +662,10 @@ class Ui_MainWindow(object):
         palette6.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette6.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_start_recording.setPalette(palette6)
-        font6 = QFont()
-        font6.setPointSize(15)
-        font6.setBold(True)
-        self.pushButton_start_recording.setFont(font6)
+        font7 = QFont()
+        font7.setPointSize(15)
+        font7.setBold(True)
+        self.pushButton_start_recording.setFont(font7)
 
         self.horizontalLayout_3.addWidget(self.pushButton_start_recording)
 
@@ -674,7 +686,7 @@ class Ui_MainWindow(object):
         palette7.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette7.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_stop_recording.setPalette(palette7)
-        self.pushButton_stop_recording.setFont(font6)
+        self.pushButton_stop_recording.setFont(font7)
 
         self.horizontalLayout_3.addWidget(self.pushButton_stop_recording)
 
@@ -695,7 +707,7 @@ class Ui_MainWindow(object):
         palette8.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette8.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_rerecord.setPalette(palette8)
-        self.pushButton_rerecord.setFont(font6)
+        self.pushButton_rerecord.setFont(font7)
 
         self.horizontalLayout_3.addWidget(self.pushButton_rerecord)
 
@@ -716,7 +728,7 @@ class Ui_MainWindow(object):
         palette9.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette9.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_finish_episode.setPalette(palette9)
-        self.pushButton_finish_episode.setFont(font6)
+        self.pushButton_finish_episode.setFont(font7)
 
         self.horizontalLayout_3.addWidget(self.pushButton_finish_episode)
 
@@ -737,7 +749,7 @@ class Ui_MainWindow(object):
         palette10.setBrush(QPalette.Disabled, QPalette.Button, brush1)
         palette10.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
         self.pushButton_fail_episode.setPalette(palette10)
-        self.pushButton_fail_episode.setFont(font6)
+        self.pushButton_fail_episode.setFont(font7)
 
         self.horizontalLayout_3.addWidget(self.pushButton_fail_episode)
 
@@ -755,7 +767,7 @@ class Ui_MainWindow(object):
         self.pushButton_dryrun.setSizePolicy(sizePolicy5)
         self.pushButton_dryrun.setMinimumSize(QSize(150, 150))
         self.pushButton_dryrun.setMaximumSize(QSize(244, 16777215))
-        self.pushButton_dryrun.setFont(font6)
+        self.pushButton_dryrun.setFont(font7)
 
         self.horizontalLayout_3.addWidget(self.pushButton_dryrun)
 
@@ -864,6 +876,7 @@ class Ui_MainWindow(object):
         self.comboBox_episode_object.setToolTip(QCoreApplication.translate("MainWindow", u"Pick a preset object/variant, or type a custom one. Fills the {object} placeholder in the task's instruction template. Can be changed between episodes without stopping the session.", None))
 #endif // QT_CONFIG(tooltip)
         self.label_instruction_preview.setText(QCoreApplication.translate("MainWindow", u"Instruction: ", None))
+        self.label_task_history.setText(QCoreApplication.translate("MainWindow", u"Recorded so far: (none yet)", None))
         self.label_2.setText(QCoreApplication.translate("MainWindow", u"EPISODE\n"
 "COUNT", None))
         self.pushButton_episode_count_minus.setText(QCoreApplication.translate("MainWindow", u"-", None))

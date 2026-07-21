@@ -183,6 +183,47 @@ def get_last_episode_index(file_path):
         return None
 
 
+def get_recorded_task_stats(repo_id: str) -> dict:
+    """
+    Summarize the instructions already recorded for a dataset repo, by reading
+    its local meta/episodes.jsonl (the same file get_last_episode_index reads).
+
+    :param repo_id: The dataset repo id, e.g. "YourUser/trossen_ai_pick_and_place".
+    :return: dict with:
+        - "counts": {instruction_string: episode_count}
+        - "last_task": the instruction used in the most recently recorded
+          episode, or None if the dataset doesn't exist locally yet.
+    """
+    file_path = os.path.join(
+        os.path.expanduser("~"),
+        ".cache",
+        "huggingface",
+        "lerobot",
+        repo_id,
+        "meta",
+        "episodes.jsonl",
+    )
+    counts: dict = {}
+    last_task = None
+
+    if not os.path.exists(file_path):
+        return {"counts": counts, "last_task": last_task}
+
+    with open(file_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            tasks = entry.get("tasks", [])
+            for task in tasks:
+                counts[task] = counts.get(task, 0) + 1
+            if tasks:
+                last_task = tasks[-1]
+
+    return {"counts": counts, "last_task": last_task}
+
+
 def remove_corrupted_files(file_path):
     file_path = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "lerobot", file_path)
     if os.path.exists(file_path):

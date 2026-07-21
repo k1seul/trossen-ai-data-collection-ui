@@ -63,6 +63,7 @@ from trossen_ai_data_collection_ui.utils.utils import (
     CalibrationConfig,
     create_robot_config,
     get_last_episode_index,
+    get_recorded_task_stats,
     load_config,
     paintEvent,
     remove_corrupted_files,
@@ -477,6 +478,9 @@ class MainWindow(QMainWindow):
 
         # Populate the object/variant combobox for the initially selected task, and
         # keep the live instruction preview in sync as the operator edits/selects it.
+        # Counts of how many episodes have already been recorded per object/variant
+        # for the currently selected task, keyed by the object/variant string.
+        self._task_object_counts: dict[str, int] = {}
         self.ui.comboBox_episode_object.editTextChanged.connect(self.update_instruction_preview)
         self.refresh_episode_object_choices()
 
@@ -1230,25 +1234,118 @@ class MainWindow(QMainWindow):
         self.set_logs(f"Selected new task: {self.selected_task}")
         self.refresh_episode_object_choices()
 
+    @staticmethod
+    def _extract_object_from_instruction(template: str, instruction: str) -> str | None:
+        """
+        Reverse-map a full recorded instruction back to its `{object}` value.
+
+        Given a task_description template containing an `{object}` placeholder
+        and a full instruction string that was actually recorded, return the
+        substring that must have filled the placeholder, or None if the
+        instruction doesn't match the template's fixed prefix/suffix (e.g. it
+        was recorded under a since-changed template).
+
+        :param template: The task's task_description, e.g. "Pick up the {object}.".
+        :param instruction: A previously recorded full instruction string.
+        :return: The extracted object/variant substring, or None if no match.
+        """
+        if "{object}" not in template:
+            return None
+        prefix, suffix = template.split("{object}", 1)
+        if not instruction.startswith(prefix) or not instruction.endswith(suffix):
+            return None
+        end = len(instruction) - len(suffix) if suffix else len(instruction)
+        if end < len(prefix):
+            return None
+        return instruction[len(prefix) : end]
+
     def refresh_episode_object_choices(self) -> None:
         """
         Repopulate the object/variant combobox for the currently selected task.
 
-        Reads the optional `task_objects` list from the selected task's config
-        (used as dropdown presets, e.g. ["red block", "blue block"]) and updates
-        the live instruction preview to match. The combobox stays editable, so
-        an object not in the preset list can still be typed in freely.
+        Combines the optional `task_objects` preset list from the task's config
+        with every object/variant already recorded for this task's repo (read
+        from its local meta/tasks.jsonl and meta/episodes.jsonl), so previously
+        used instructions can be picked up again instead of only being typed
+        from scratch. Defaults the selection to whichever variant was most
+        recently recorded, so an interrupted session can be resumed as-is; if
+        nothing has been recorded yet, falls back to the first preset. The
+        combobox stays editable, so a brand new object/variant can still be
+        typed in freely and will show up here again next time.
+
+        Also refreshes the per-variant episode-count summary label.
         """
         task_config = self.get_task_parameters(self.selected_task) or {}
-        objects = task_config.get("task_objects", []) or []
+        preset_objects = list(task_config.get("task_objects", []) or [])
+        template = task_config.get("task_description", "")
+        hf_user = task_config.get("hf_user")
+
+        self._task_object_counts = {}
+        last_object = None
+
+        if hf_user:
+            repo_id = f"{hf_user}/{self.selected_task}"
+            stats = get_recorded_task_stats(repo_id)
+
+            for recorded_instruction, count in stats["counts"].items():
+                if "{object}" in template:
+                    obj = self._extract_object_from_instruction(template, recorded_instruction)
+                    if obj is None:  # Doesn't match the current template; skip it.
+                        continue
+                else:
+                    obj = recorded_instruction
+                self._task_object_counts[obj] = self._task_object_counts.get(obj, 0) + count
+
+            if stats["last_task"] is not None:
+                if "{object}" in template:
+                    last_object = self._extract_object_from_instruction(template, stats["last_task"])
+                else:
+                    last_object = stats["last_task"]
+
+        # Presets first (so they're always available as suggestions), then any
+        # additional objects/variants discovered from recording history. Kept
+        # around so the history summary can list presets with zero episodes
+        # too (useful for spotting under-recorded variants at a glance).
+        combined_objects = list(preset_objects)
+        for obj in self._task_object_counts:
+            if obj not in combined_objects:
+                combined_objects.append(obj)
+        self._known_objects = combined_objects
 
         self.ui.comboBox_episode_object.blockSignals(True)
         self.ui.comboBox_episode_object.clear()
-        self.ui.comboBox_episode_object.addItems(objects)
-        self.ui.comboBox_episode_object.setCurrentText(objects[0] if objects else "")
+        self.ui.comboBox_episode_object.addItems(combined_objects)
+        if last_object is not None and last_object in combined_objects:
+            default_object = last_object
+        else:
+            default_object = combined_objects[0] if combined_objects else ""
+        self.ui.comboBox_episode_object.setCurrentText(default_object)
         self.ui.comboBox_episode_object.blockSignals(False)
 
         self.update_instruction_preview()
+        self.update_task_history_summary()
+
+    def update_task_history_summary(self) -> None:
+        """
+        Refresh the label showing how many episodes have been recorded so far
+        for each object/variant of the currently selected task. Includes
+        presets with zero episodes recorded, so under-recorded variants are
+        easy to spot at a glance.
+        """
+        known_objects = getattr(self, "_known_objects", [])
+        # Include any object recorded live this session that wasn't in the
+        # known list yet (e.g. a brand new one typed in mid-session).
+        all_objects = list(known_objects)
+        for obj in self._task_object_counts:
+            if obj not in all_objects:
+                all_objects.append(obj)
+
+        if not all_objects:
+            self.ui.label_task_history.setText("Recorded so far: (none yet)")
+            return
+
+        parts = [f"{obj} ×{self._task_object_counts.get(obj, 0)}" for obj in all_objects]
+        self.ui.label_task_history.setText("Recorded so far: " + "  ·  ".join(parts))
 
     def get_current_instruction(self) -> str:
         """
@@ -1652,6 +1749,10 @@ class MainWindow(QMainWindow):
 
         recorded_episodes = 0
         batched_episodes = 0
+        # Used to decide, per completed episode, whether to key the live
+        # per-object/variant count by the object combobox text or the full
+        # instruction (see the "{object}" in template checks below).
+        template = (self.get_task_parameters(self.selected_task) or {}).get("task_description", "")
         # Recording loop
         try:
             while True:
@@ -1762,6 +1863,14 @@ class MainWindow(QMainWindow):
                     self.events["finish_episode"] = False
 
                 dataset.add_episode_to_batch()
+
+                # Update the live per-object/variant episode count shown in the UI.
+                if "{object}" in template:
+                    obj_key = self.ui.comboBox_episode_object.currentText().strip()
+                else:
+                    obj_key = episode_instruction
+                self._task_object_counts[obj_key] = self._task_object_counts.get(obj_key, 0) + 1
+                self.update_task_history_summary()
 
                 recorded_episodes += 1
                 batched_episodes += 1
