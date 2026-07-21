@@ -602,6 +602,48 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout_3.addWidget(self.pushButton_rerecord)
 
+        self.pushButton_finish_episode = QPushButton(self.centralwidget)
+        self.pushButton_finish_episode.setObjectName(u"pushButton_finish_episode")
+        self.pushButton_finish_episode.setEnabled(False)
+        sizePolicy5.setHeightForWidth(self.pushButton_finish_episode.sizePolicy().hasHeightForWidth())
+        self.pushButton_finish_episode.setSizePolicy(sizePolicy5)
+        self.pushButton_finish_episode.setMinimumSize(QSize(150, 150))
+        self.pushButton_finish_episode.setMaximumSize(QSize(180, 16777215))
+        palette8 = QPalette()
+        brush28 = QBrush(QColor(52, 152, 219, 255))
+        brush28.setStyle(Qt.SolidPattern)
+        palette8.setBrush(QPalette.Active, QPalette.Button, brush28)
+        palette8.setBrush(QPalette.Active, QPalette.ButtonText, brush)
+        palette8.setBrush(QPalette.Inactive, QPalette.Button, brush1)
+        palette8.setBrush(QPalette.Inactive, QPalette.ButtonText, brush)
+        palette8.setBrush(QPalette.Disabled, QPalette.Button, brush1)
+        palette8.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
+        self.pushButton_finish_episode.setPalette(palette8)
+        self.pushButton_finish_episode.setFont(font1)
+
+        self.horizontalLayout_3.addWidget(self.pushButton_finish_episode)
+
+        self.pushButton_fail_episode = QPushButton(self.centralwidget)
+        self.pushButton_fail_episode.setObjectName(u"pushButton_fail_episode")
+        self.pushButton_fail_episode.setEnabled(False)
+        sizePolicy5.setHeightForWidth(self.pushButton_fail_episode.sizePolicy().hasHeightForWidth())
+        self.pushButton_fail_episode.setSizePolicy(sizePolicy5)
+        self.pushButton_fail_episode.setMinimumSize(QSize(150, 150))
+        self.pushButton_fail_episode.setMaximumSize(QSize(180, 16777215))
+        palette9 = QPalette()
+        brush29 = QBrush(QColor(245, 121, 0, 255))
+        brush29.setStyle(Qt.SolidPattern)
+        palette9.setBrush(QPalette.Active, QPalette.Button, brush29)
+        palette9.setBrush(QPalette.Active, QPalette.ButtonText, brush7)
+        palette9.setBrush(QPalette.Inactive, QPalette.Button, brush1)
+        palette9.setBrush(QPalette.Inactive, QPalette.ButtonText, brush)
+        palette9.setBrush(QPalette.Disabled, QPalette.Button, brush1)
+        palette9.setBrush(QPalette.Disabled, QPalette.ButtonText, brush11)
+        self.pushButton_fail_episode.setPalette(palette9)
+        self.pushButton_fail_episode.setFont(font1)
+
+        self.horizontalLayout_3.addWidget(self.pushButton_fail_episode)
+
         self.line_2 = QFrame(self.centralwidget)
         self.line_2.setObjectName(u"line_2")
         self.line_2.setFrameShape(QFrame.Shape.VLine)
@@ -663,11 +705,11 @@ class Ui_MainWindow(object):
         self.progressBar_recording_progress.setSizePolicy(sizePolicy5)
         self.progressBar_recording_progress.setMinimumSize(QSize(0, 100))
         self.progressBar_recording_progress.setMaximumSize(QSize(690, 16777215))
-        palette8 = QPalette()
-        palette8.setBrush(QPalette.Active, QPalette.Base, brush6)
-        palette8.setBrush(QPalette.Inactive, QPalette.Base, brush6)
-        palette8.setBrush(QPalette.Disabled, QPalette.Base, brush7)
-        self.progressBar_recording_progress.setPalette(palette8)
+        palette10 = QPalette()
+        palette10.setBrush(QPalette.Active, QPalette.Base, brush6)
+        palette10.setBrush(QPalette.Inactive, QPalette.Base, brush6)
+        palette10.setBrush(QPalette.Disabled, QPalette.Base, brush7)
+        self.progressBar_recording_progress.setPalette(palette10)
         self.progressBar_recording_progress.setValue(0)
         self.progressBar_recording_progress.setTextVisible(False)
 
@@ -732,6 +774,12 @@ class Ui_MainWindow(object):
         self.pushButton_rerecord.setText(QCoreApplication.translate("MainWindow", u"RE-RECORD\n"
 "LAST\n"
 "EPISODE", None))
+        self.pushButton_finish_episode.setText(QCoreApplication.translate("MainWindow", u"FINISH\n"
+"EPISODE\n"
+"NEXT", None))
+        self.pushButton_fail_episode.setText(QCoreApplication.translate("MainWindow", u"FAIL\n"
+"EPISODE\n"
+"NEXT", None))
         self.pushButton_dryrun.setText(QCoreApplication.translate("MainWindow", u"DRY\n"
 "RUN", None))
         self.label_recording_progress.setText(QCoreApplication.translate("MainWindow", u"EPISODE PROGRESS", None))

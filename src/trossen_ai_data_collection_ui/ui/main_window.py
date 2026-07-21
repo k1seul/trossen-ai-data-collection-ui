@@ -510,6 +510,8 @@ class MainWindow(QMainWindow):
             "exit_early": False,
             "stop_recording": False,
             "rerecord_episode": False,
+            "finish_episode": False,
+            "fail_episode": False,
         }
 
         # Reset tracking for non-blocking reset operations
@@ -519,6 +521,12 @@ class MainWindow(QMainWindow):
         self.ui.pushButton_rerecord.clicked.connect(self.set_rerecord_episode)
         self.ui.pushButton_stop_recording.clicked.connect(self.set_stop_recording)
         self.ui.pushButton_dryrun.clicked.connect(self.start_dry_run)
+
+        # Connect buttons for ending the current episode early (saved) and
+        # marking the current episode as failed (discarded), both advancing
+        # to the next episode.
+        self.ui.pushButton_finish_episode.clicked.connect(self.set_finish_episode)
+        self.ui.pushButton_fail_episode.clicked.connect(self.set_fail_episode)
 
         # Connect reset buttons.
         self.ui.pushButton_resetarms.clicked.connect(self.start_reset_arms)
@@ -730,6 +738,32 @@ class MainWindow(QMainWindow):
         logger.info("Stop recording triggered by user")
         self.set_logs("Stop recording triggered")
         self.events["stop_recording"] = True
+        self.events["exit_early"] = True
+
+    def set_finish_episode(self) -> None:
+        """
+        Finish the current episode early and advance to the next one.
+
+        Ends data collection for the current episode immediately, keeps the
+        data recorded so far, saves it, and moves on to the next episode
+        (or ends the session if this was the last episode).
+        """
+        logger.info("Finish episode triggered by user")
+        self.set_logs("Finish episode triggered: saving episode and moving to the next one")
+        self.events["finish_episode"] = True
+        self.events["exit_early"] = True
+
+    def set_fail_episode(self) -> None:
+        """
+        Mark the current episode as failed and advance to the next one.
+
+        Ends data collection for the current episode immediately, discards
+        the data recorded so far (unlike re-record, it is not retried), and
+        moves on to the next episode.
+        """
+        logger.info("Fail episode triggered by user")
+        self.set_logs("Fail episode triggered: discarding episode and moving to the next one")
+        self.events["fail_episode"] = True
         self.events["exit_early"] = True
 
     def on_worker_finished(self) -> None:
@@ -1594,8 +1628,10 @@ class MainWindow(QMainWindow):
 
                 self.ui.label_total_time.setText(f"{float(cfg.episode_time_s)}s")
 
-                # Enable rerecord button during episode recording
+                # Enable rerecord, finish and fail buttons during episode recording
                 self.ui.pushButton_rerecord.setEnabled(True)
+                self.ui.pushButton_finish_episode.setEnabled(True)
+                self.ui.pushButton_fail_episode.setEnabled(True)
 
                 self.control_loop(
                     robot=robot,
@@ -1612,8 +1648,10 @@ class MainWindow(QMainWindow):
                 # Ensure progress bar shows 100% at completion
                 self.worker.progress.emit(100)
 
-                # Disable rerecord button until new episode is started
+                # Disable rerecord, finish and fail buttons until new episode is started
                 self.ui.pushButton_rerecord.setEnabled(False)
+                self.ui.pushButton_finish_episode.setEnabled(False)
+                self.ui.pushButton_fail_episode.setEnabled(False)
 
                 # Reset phase - start reset without blocking
                 if not self.events["stop_recording"] and (
@@ -1632,6 +1670,39 @@ class MainWindow(QMainWindow):
                     self.events["exit_early"] = False
                     dataset.clear_episode_buffer()
                     continue
+
+                # Handle fail episode event: discard the current episode's data
+                # (unlike rerecord, it is NOT retried) and advance to the next episode.
+                if self.events["fail_episode"]:
+                    logger.info(f"Episode {episode_idx} marked as failed; discarding data")
+                    log_say("Episode failed", cfg.play_sounds)
+                    self.log_signal.emit(
+                        colored(f"Episode {episode_idx} marked as failed. Discarding data.", "red"),
+                        True,
+                    )
+                    self.events["fail_episode"] = False
+                    self.events["exit_early"] = False
+                    dataset.clear_episode_buffer()
+
+                    recorded_episodes += 1
+                    logger.info(
+                        f"Episode {episode_idx} failed "
+                        f"({recorded_episodes}/{cfg.num_episodes} attempted, "
+                        f"{batched_episodes} in current batch)"
+                    )
+
+                    if self.events["stop_recording"]:  # Exit loop if stop event is triggered.
+                        logger.info("Stop recording triggered by user")
+                        break
+                    continue
+
+                if self.events["finish_episode"]:
+                    logger.info(f"Episode {episode_idx} finished early by user")
+                    self.log_signal.emit(
+                        f"Episode {episode_idx} finished early. Saving and moving to the next episode.",
+                        True,
+                    )
+                    self.events["finish_episode"] = False
 
                 dataset.add_episode_to_batch()
 
