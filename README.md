@@ -56,6 +56,19 @@ Key files:
 - `src/trossen_ai_data_collection_ui/resources/app.ui` / `app.py` — Qt Designer UI + generated code
 - `src/trossen_ai_data_collection_ui/configs/` — default robot/task YAML configs
 
+## Creating a new task
+
+Use **Edit > New Task...** in the app to add a task through a form (name,
+robot model, HF user, instruction, optional object/variant list, timing,
+push to hub) instead of hand-editing `tasks.yaml`. It appends a validated
+entry to the persistent `tasks.yaml`, reloads it, and selects the new task
+in TASK SELECTION — click START RECORDING SESSION and you're recording,
+no other setup needed. The rest of `tasks.yaml` (including comments) is
+left untouched.
+
+See `docs/data_collection_protocol.md` for the current task curriculum and
+recording protocol.
+
 ## Multi-task / multi-object data collection
 
 Recording controls also include two buttons for managing episodes without
