@@ -74,42 +74,21 @@ tasks:
     save_interval: 1
 
   # ===========================================================================
-  # Difficulty Tier 4 (medium): precision placement onto the small stand
-  # instead of dropping into a large bowl -- much smaller target area.
-  # ===========================================================================
-  - task_name: "place_block_on_stand"
-    robot_model: "trossen_ai_solo"
-    task_description: "Pick up the {object} and place it on the stand."
-    task_objects:
-      - "red block"
-      - "blue block"
-      - "green block"
-      - "yellow block"
-    episode_length_s: 18
-    warmup_time_s: 5
-    reset_time_s: 15
-    long_reset_interval: 10
-    long_reset_time_s: 60
-    hf_user: "k1seul"
-    fps: 30
-    display_fps: 30
-    push_to_hub: true
-    play_sounds: true
-    disable_active_ui_updates: false
-    save_interval: 1
-
-  # ===========================================================================
-  # Difficulty Tier 5 (medium): stacking -- precise alignment plus a gentle,
-  # controlled release so the stack doesn't topple.
+  # Difficulty Tier 4 (medium): stacking colored tape rolls -- precise
+  # alignment plus a gentle, controlled release so the stack doesn't topple.
+  # Both the picked and base tape colors are named explicitly in each
+  # instruction (not "the other one"), since there are 5 tape colors on hand
+  # and the pairing must be unambiguous.
   # ===========================================================================
   - task_name: "stack_blocks"
     robot_model: "trossen_ai_solo"
-    task_description: "Pick up the {object} and stack it on top of the other block."
+    task_description: "{object}"
     task_objects:
-      - "red block"
-      - "blue block"
-      - "green block"
-      - "yellow block"
+      - "Pick up the red tape and stack it on top of the orange tape."
+      - "Pick up the orange tape and stack it on top of the yellow tape."
+      - "Pick up the yellow tape and stack it on top of the green tape."
+      - "Pick up the green tape and stack it on top of the purple tape."
+      - "Pick up the purple tape and stack it on top of the red tape."
     episode_length_s: 20
     warmup_time_s: 5
     reset_time_s: 15
@@ -124,7 +103,7 @@ tasks:
     save_interval: 1
 
   # ===========================================================================
-  # Difficulty Tier 6 (medium-hard): sequential/compound task -- pick two
+  # Difficulty Tier 5 (medium-hard): sequential/compound task -- pick two
   # objects in order within a single episode. This was your own earlier idea
   # (previously named pick_up_the_red_than_blue_block); it's restored here as
   # a proper multi-variant task so multiple color pairs share one repo.
@@ -151,7 +130,7 @@ tasks:
     save_interval: 1
 
   # ===========================================================================
-  # Difficulty Tier 7 (hard): clutter/discrimination -- ALL blocks and fruits
+  # Difficulty Tier 6 (hard): clutter/discrimination -- ALL blocks and fruits
   # are on the mat at once (see protocol doc for scene setup); the robot must
   # pick only the one named in the instruction and ignore the rest.
   # ===========================================================================
@@ -181,7 +160,7 @@ tasks:
     save_interval: 1
 
   # ===========================================================================
-  # Difficulty Tier 8 (hardest, single-arm): spatial precision using zones
+  # Difficulty Tier 7 (hardest, single-arm): spatial precision using zones
   # marked on the whiteboard sheet over the cutting mat (see protocol doc for
   # how to mark zones A/B/C). Tests precise placement at an exact location
   # rather than "anywhere in a container".

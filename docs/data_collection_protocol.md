@@ -5,10 +5,12 @@ hardware set up; `trossen_ai_stationary`/`trossen_ai_mobile` are still
 placeholders). Cameras: `cam_high`, `cam_wrist`, `cam_front`.
 
 Props on hand: colored wooden blocks, bowl, pot (냄비), orange/banana/apple/peach
-(fruit props), a small stand (받침), and a cutting mat with a whiteboard sheet
-on top that can be marked for fixed positions/zones.
+(fruit props), colored tape rolls, and a cutting mat with a whiteboard sheet
+on top that can be marked for fixed positions/zones. (The small stand prop
+is no longer used by the curriculum below.)
 
 Block colors: **red, blue, green, yellow** (confirmed — no purple).
+Tape colors: **red, orange, yellow, green, purple** (5 colors).
 
 ## Curriculum (easy → hard)
 
@@ -21,13 +23,12 @@ individually via lerobot's per-episode task metadata (not separate repos).
 | 1 — Easy | `pick_place_block_bowl` | "Pick up the {color} block and place it in the bowl." | 4 colors | Single object type, large forgiving target |
 | 2 — Easy | `pick_place_block_pot` | "...place it in the pot." | 4 colors | Same skill, adds container-shape variety |
 | 3 — Easy-medium | `pick_place_fruit_bowl` | "Pick up the {fruit} and place it in the bowl." | 4 fruits | Different shapes/sizes force grasp adaptation |
-| 4 — Medium | `place_block_on_stand` | "...place it on the stand." | 4 colors | Small target area — precision placement |
-| 5 — Medium | `stack_blocks` | "...stack it on top of the other block." | 4 colors | Precise alignment + gentle release |
-| 6 — Medium-hard | `sequential_two_blocks_bowl` | "Pick up A ... then pick up B ..." (full sentence per variant) | 4 ordered pairs | Two-step compound task in one episode |
-| 7 — Hard | `pick_specific_item_from_clutter` | "Pick up the {item} ... Do not touch the other items." | 8 items (blocks+fruit) | All props on the mat at once — discrimination |
-| 8 — Hardest | `place_object_in_marked_zone` | "Pick up A and place it in zone X." (full sentence per variant) | 5 combos | Precise spatial placement at a marked location, not "anywhere in a container" |
+| 4 — Medium | `stack_blocks` | "Pick up the {A} tape and stack it on top of the {B} tape." (full sentence per pair, both colors always named explicitly) | 5 ordered tape-color pairs | Precise alignment + gentle release; unambiguous pick/base pairing |
+| 5 — Medium-hard | `sequential_two_blocks_bowl` | "Pick up A ... then pick up B ..." (full sentence per variant) | 4 ordered pairs | Two-step compound task in one episode |
+| 6 — Hard | `pick_specific_item_from_clutter` | "Pick up the {item} ... Do not touch the other items." | 8 items (blocks+fruit) | All props on the mat at once — discrimination |
+| 7 — Hardest | `place_object_in_marked_zone` | "Pick up A and place it in zone X." (full sentence per variant) | 5 combos | Precise spatial placement at a marked location, not "anywhere in a container" |
 
-Current overall target: **1150 episodes** across all tiers (see
+Current overall target: **1030 episodes** across all tiers (see
 `data_collection_plan.md` for the live per-variant breakdown).
 
 Recommended starting targets (edit `target_episodes` in
@@ -35,10 +36,10 @@ Recommended starting targets (edit `target_episodes` in
 directly — the app never overwrites what you set there):
 
 - Tiers 1–3: **~30 episodes** per object/variant
-- Tiers 4–5: **~40 episodes** per variant (precision tasks need more data)
-- Tier 6: **~30 episodes** per ordered pair
-- Tier 7: **~25 episodes** per item (relies on scene diversity, not per-item volume)
-- Tier 8: **~30 episodes** per combo
+- Tier 4 (tape stacking): **~40 episodes** per pair (precision task needs more data)
+- Tier 5: **~30 episodes** per ordered pair
+- Tier 6: **~25 episodes** per item (relies on scene diversity, not per-item volume)
+- Tier 7: **~30 episodes** per combo
 
 Collect tiers roughly in order — each one reuses skills/scenes from the
 previous tier, so early mistakes in technique get caught before they're
@@ -53,11 +54,13 @@ baked into a harder task's data.
    mid-batch without noticing).
 2. Consistent, even lighting — avoid strong shadows or backlighting that
    changes through the day.
-3. Clear the mat of anything not part of the current task (except Tier 7,
+3. Clear the mat of anything not part of the current task (except Tier 6,
    which intentionally wants everything out).
 4. Click **HARDWARE RESET CAMERAS** before starting for a clean camera state.
-5. For Tier 8, mark zones A/B/C on the whiteboard sheet now (tape outline or
+5. For Tier 7, mark zones A/B/C on the whiteboard sheet now (tape outline or
    marker) so they stay fixed and consistent for every episode of that tier.
+   Note: Tier 4's tape rolls are the *stacking objects themselves*, not the
+   Tier 7 zone markers — keep the two uses of tape mentally separate.
 
 ## Before each object/variant batch
 
@@ -75,9 +78,9 @@ This matters more than anything else for a policy that generalizes:
 - Before each episode, physically move the target object to a **new**
   position/orientation within a reasonable region — never the exact same
   spot twice in a row.
-- For Tier 7 (clutter), also shuffle the distractor objects' positions each
+- For Tier 6 (clutter), also shuffle the distractor objects' positions each
   episode.
-- For Tier 8 (marked zones), randomize the object's **start** position, but
+- For Tier 7 (marked zones), randomize the object's **start** position, but
   keep the target zone boundaries fixed as marked.
 - Start the robot from the same neutral/home pose each episode (let the
   warmup phase settle into it) — vary the object, not the robot's starting
