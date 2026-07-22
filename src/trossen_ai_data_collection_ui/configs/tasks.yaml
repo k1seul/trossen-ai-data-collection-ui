@@ -10,10 +10,11 @@ tasks:
       - "blue block"
       - "green block"
       - "yellow block"
-      - "purple block"
     episode_length_s: 15
     warmup_time_s: 5
     reset_time_s: 15
+    long_reset_interval: 10
+    long_reset_time_s: 60
     hf_user: "k1seul"
     fps: 30
     display_fps: 30
@@ -34,10 +35,11 @@ tasks:
       - "blue block"
       - "green block"
       - "yellow block"
-      - "purple block"
     episode_length_s: 15
     warmup_time_s: 5
     reset_time_s: 15
+    long_reset_interval: 10
+    long_reset_time_s: 60
     hf_user: "k1seul"
     fps: 30
     display_fps: 30
@@ -61,6 +63,8 @@ tasks:
     episode_length_s: 18
     warmup_time_s: 5
     reset_time_s: 15
+    long_reset_interval: 10
+    long_reset_time_s: 60
     hf_user: "k1seul"
     fps: 30
     display_fps: 30
@@ -81,10 +85,11 @@ tasks:
       - "blue block"
       - "green block"
       - "yellow block"
-      - "purple block"
     episode_length_s: 18
     warmup_time_s: 5
     reset_time_s: 15
+    long_reset_interval: 10
+    long_reset_time_s: 60
     hf_user: "k1seul"
     fps: 30
     display_fps: 30
@@ -108,6 +113,8 @@ tasks:
     episode_length_s: 20
     warmup_time_s: 5
     reset_time_s: 15
+    long_reset_interval: 10
+    long_reset_time_s: 60
     hf_user: "k1seul"
     fps: 30
     display_fps: 30
@@ -133,6 +140,8 @@ tasks:
     episode_length_s: 35
     warmup_time_s: 10
     reset_time_s: 20
+    long_reset_interval: 10
+    long_reset_time_s: 60
     hf_user: "k1seul"
     fps: 30
     display_fps: 30
@@ -154,7 +163,6 @@ tasks:
       - "blue block"
       - "green block"
       - "yellow block"
-      - "purple block"
       - "orange"
       - "banana"
       - "apple"
@@ -162,6 +170,8 @@ tasks:
     episode_length_s: 20
     warmup_time_s: 10
     reset_time_s: 25
+    long_reset_interval: 10
+    long_reset_time_s: 60
     hf_user: "k1seul"
     fps: 30
     display_fps: 30
@@ -188,6 +198,8 @@ tasks:
     episode_length_s: 20
     warmup_time_s: 10
     reset_time_s: 15
+    long_reset_interval: 10
+    long_reset_time_s: 60
     hf_user: "k1seul"
     fps: 30
     display_fps: 30

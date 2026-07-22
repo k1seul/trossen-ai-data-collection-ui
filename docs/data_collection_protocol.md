@@ -8,8 +8,7 @@ Props on hand: colored wooden blocks, bowl, pot (냄비), orange/banana/apple/pe
 (fruit props), a small stand (받침), and a cutting mat with a whiteboard sheet
 on top that can be marked for fixed positions/zones.
 
-Block colors below are a guess (red/blue/green/yellow/purple) — correct the
-`task_objects` lists in `configs/tasks.yaml` to match what you actually have.
+Block colors: **red, blue, green, yellow** (confirmed — no purple).
 
 ## Curriculum (easy → hard)
 
@@ -19,14 +18,17 @@ individually via lerobot's per-episode task metadata (not separate repos).
 
 | Tier | Task (`task_name`) | Instruction pattern | Object/variant count | Why it's this difficulty |
 |---|---|---|---|---|
-| 1 — Easy | `pick_place_block_bowl` | "Pick up the {color} block and place it in the bowl." | 5 colors | Single object type, large forgiving target |
-| 2 — Easy | `pick_place_block_pot` | "...place it in the pot." | 5 colors | Same skill, adds container-shape variety |
+| 1 — Easy | `pick_place_block_bowl` | "Pick up the {color} block and place it in the bowl." | 4 colors | Single object type, large forgiving target |
+| 2 — Easy | `pick_place_block_pot` | "...place it in the pot." | 4 colors | Same skill, adds container-shape variety |
 | 3 — Easy-medium | `pick_place_fruit_bowl` | "Pick up the {fruit} and place it in the bowl." | 4 fruits | Different shapes/sizes force grasp adaptation |
-| 4 — Medium | `place_block_on_stand` | "...place it on the stand." | 5 colors | Small target area — precision placement |
+| 4 — Medium | `place_block_on_stand` | "...place it on the stand." | 4 colors | Small target area — precision placement |
 | 5 — Medium | `stack_blocks` | "...stack it on top of the other block." | 4 colors | Precise alignment + gentle release |
 | 6 — Medium-hard | `sequential_two_blocks_bowl` | "Pick up A ... then pick up B ..." (full sentence per variant) | 4 ordered pairs | Two-step compound task in one episode |
-| 7 — Hard | `pick_specific_item_from_clutter` | "Pick up the {item} ... Do not touch the other items." | 9 items (blocks+fruit) | All props on the mat at once — discrimination |
+| 7 — Hard | `pick_specific_item_from_clutter` | "Pick up the {item} ... Do not touch the other items." | 8 items (blocks+fruit) | All props on the mat at once — discrimination |
 | 8 — Hardest | `place_object_in_marked_zone` | "Pick up A and place it in zone X." (full sentence per variant) | 5 combos | Precise spatial placement at a marked location, not "anywhere in a container" |
+
+Current overall target: **1150 episodes** across all tiers (see
+`data_collection_plan.md` for the live per-variant breakdown).
 
 Recommended starting targets (edit `target_episodes` in
 `~/.trossen/trossen_ai_data_collection/plan/data_collection_plan.csv`
@@ -97,6 +99,21 @@ This matters more than anything else for a policy that generalizes:
    - Want to abandon it and move to the next episode instead → **FAIL
      EPISODE NEXT**.
 5. Reposition the object during the automatic reset phase between episodes.
+
+## Periodic long reset (every 10 episodes)
+
+Every task is configured with `long_reset_interval: 10` and
+`long_reset_time_s: 60` — after every 10th completed episode, the reset
+phase runs for 60s instead of the normal `reset_time_s`, so there's real
+time to re-set-up the scene (re-check prop positions/orientations, wipe the
+mat, re-mark zones if they drifted, etc.) rather than just repositioning
+one object. The log shows **"Long environment reset (60s)..."** when this
+happens so it's obvious it's not the usual short pause.
+
+You don't have to wait out the full 60s: once you're done setting up,
+click **SETUP DONE — START NEXT EPISODE NOW** (enabled only while a reset
+is in progress) to start the next episode immediately. This works for the
+normal short resets too, not just the long ones.
 
 ## Switching object/variant
 

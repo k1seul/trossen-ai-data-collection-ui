@@ -560,6 +560,10 @@ class MainWindow(QMainWindow):
         self.ui.pushButton_finish_episode.clicked.connect(self.set_finish_episode)
         self.ui.pushButton_fail_episode.clicked.connect(self.set_fail_episode)
 
+        # Skip the rest of the environment-reset wait once re-setup is done,
+        # only relevant (and enabled) while a reset is actually in progress.
+        self.ui.pushButton_skip_reset.clicked.connect(self.set_skip_reset)
+
         # Connect reset buttons.
         self.ui.pushButton_resetarms.clicked.connect(self.start_reset_arms)
         self.ui.pushButton_resetcameras.clicked.connect(self.hardware_reset_cameras)
@@ -1011,6 +1015,19 @@ class MainWindow(QMainWindow):
         logger.info("Fail episode triggered by user")
         self.set_logs("Fail episode triggered: discarding episode and moving to the next one")
         self.events["fail_episode"] = True
+        self.events["exit_early"] = True
+
+    def set_skip_reset(self) -> None:
+        """
+        End the current environment-reset wait early.
+
+        Only meaningful while a reset is in progress (the button is disabled
+        otherwise): lets the operator start the next episode immediately once
+        they've finished re-setting up the scene, instead of waiting out the
+        full reset_time_s/long_reset_time_s countdown.
+        """
+        logger.info("Skip reset triggered by user")
+        self.set_logs("Setup done: starting the next episode now")
         self.events["exit_early"] = True
 
     def on_worker_finished(self) -> None:
@@ -1469,29 +1486,38 @@ class MainWindow(QMainWindow):
         logger.info("Arm reset worker thread starting")
         self._thread.start()
 
-    def reset_environment_async(self) -> None:
+    def reset_environment_async(self, reset_time_s: float | None = None) -> None:
         """
         Start the environment reset asynchronously without blocking.
 
         This method starts a Python thread for the reset operation that runs
         in the background. Use wait_for_reset_completion() to block until reset finishes.
+        Enables the SETUP DONE button for the duration of the reset, so the
+        operator can end the wait early once they're ready.
 
+        :param reset_time_s: Duration of this reset, in seconds. Defaults to
+            the task's configured reset_time_s if not given (used for the
+            periodic longer reset -- see record()).
         :return: None
         """
+        duration = reset_time_s if reset_time_s is not None else self.worker.config.reset_time_s
 
         def reset_task():
             try:
+                self.ui.pushButton_skip_reset.setEnabled(True)
                 reset_environment(
                     self.robot,
                     self.events,
-                    self.worker.config.reset_time_s,
+                    duration,
                     self.worker.config.fps,
                 )
             except Exception as e:
                 logger.error(f"Error during async reset: {e}")
                 self.log_signal.emit(f"Error during reset: {e}", True)
+            finally:
+                self.ui.pushButton_skip_reset.setEnabled(False)
 
-        logger.debug("Starting async environment reset")
+        logger.debug(f"Starting async environment reset ({duration}s)")
         self._reset_thread = threading.Thread(target=reset_task, daemon=True)
         self._reset_thread.start()
 
@@ -2068,6 +2094,12 @@ class MainWindow(QMainWindow):
         task_config_for_plan = self.get_task_parameters(self.selected_task) or {}
         template = task_config_for_plan.get("task_description", "")
         robot_model_for_plan = task_config_for_plan.get("robot_model", "")
+        # Every `long_reset_interval` completed episodes, use `long_reset_time_s`
+        # instead of the normal reset_time_s, for a proper environment re-setup
+        # break (re-arranging props, etc.). Set long_reset_interval to 0 in the
+        # task config to disable this and always use the normal reset time.
+        long_reset_interval = int(task_config_for_plan.get("long_reset_interval", 10) or 0)
+        long_reset_time_s = float(task_config_for_plan.get("long_reset_time_s", 60))
         # Recording loop
         try:
             while True:
@@ -2130,7 +2162,32 @@ class MainWindow(QMainWindow):
                 if not self.events["stop_recording"] and (
                     (recorded_episodes < cfg.num_episodes - 1) or self.events["rerecord_episode"]
                 ):
-                    self.reset_environment_async()  # Non-blocking - returns immediately
+                    # A rerecord doesn't complete an episode, so it never triggers
+                    # the periodic long reset (immediately redoing the same one
+                    # doesn't need a fresh scene re-setup).
+                    will_complete_episode = not self.events["rerecord_episode"]
+                    next_recorded_count = (
+                        recorded_episodes + 1 if will_complete_episode else recorded_episodes
+                    )
+                    is_long_reset = (
+                        will_complete_episode
+                        and long_reset_interval > 0
+                        and next_recorded_count % long_reset_interval == 0
+                        and next_recorded_count < cfg.num_episodes
+                    )
+                    reset_duration = long_reset_time_s if is_long_reset else cfg.reset_time_s
+
+                    if is_long_reset:
+                        self.log_signal.emit(
+                            colored(
+                                f"Long environment reset ({reset_duration:.0f}s) -- "
+                                f"re-set-up the scene, then click SETUP DONE to continue.",
+                                "cyan",
+                            ),
+                            True,
+                        )
+
+                    self.reset_environment_async(reset_duration)  # Non-blocking - returns immediately
                     log_say("Reset", cfg.play_sounds, blocking=True)
                     self.log_signal.emit("Reset the environment", True)
 
