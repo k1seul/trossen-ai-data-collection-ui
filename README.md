@@ -122,6 +122,35 @@ seeded from this repo's `configs/tasks.yaml` on first run, add the
 manually (via the app's `Edit > Task Configuration` menu, or by editing the
 file directly) if you already ran the app before this feature existed.
 
+## Data collection plan (CSV + markdown)
+
+The app maintains a data collection plan at
+`~/.trossen/trossen_ai_data_collection/plan/`:
+
+- `data_collection_plan.csv` — one row per task/object-variant, with
+  `target_episodes` (yours to fill in, e.g. open it in a spreadsheet app and
+  set goals) and `recorded_episodes` (auto-updated, never overwritten by you).
+- `data_collection_plan.md` — a readable table view regenerated from the CSV
+  every time it changes, grouped by task with per-variant and overall totals.
+
+Both files are created/updated automatically:
+
+- On startup (and whenever you save `Edit > Task Configuration`), one row is
+  seeded per task/object combination found in `tasks.yaml`, pre-filled with
+  whatever's already been recorded for that repo (reads the same
+  `meta/episodes.jsonl` the OBJECT/VARIANT history feature above uses) so the
+  plan starts accurate even for episodes recorded before the plan existed.
+  Existing rows and any `target_episodes` you've set are never touched.
+- After every episode saved during a recording session, the matching row's
+  `recorded_episodes` and `last_recorded_at` are updated (or a new row is
+  appended if you typed a brand new object/variant that wasn't in the plan
+  yet), and the markdown file is regenerated.
+
+These files live outside the git repo (under your home directory) since
+they're per-machine, constantly-changing progress data rather than program
+source — back them up or copy them into version control yourself if you want
+history of your collection progress over time.
+
 ## Updating the `lerobot` dependency
 
 `lerobot` is pulled from `Interbotix/lerobot@trossen-ai` via `[tool.uv.sources]`

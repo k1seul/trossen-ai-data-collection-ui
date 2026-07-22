@@ -29,3 +29,14 @@ TROSSEN_AI_TASK_PATH_PERSISTENT = PERSISTENT_CONFIGS_ROOT / "tasks.yaml"
 
 # Path to the persistent calibration configuration YAML file
 TROSSEN_AI_CALIBRATION_CONFIG_PATH_PERSISTENT = PERSISTENT_CONFIGS_ROOT / "calibration_config.yaml"
+
+# Directory for the data collection plan/progress tracking files
+DATA_COLLECTION_PLAN_ROOT = Path.home() / ".trossen" / "trossen_ai_data_collection" / "plan"
+
+# Path to the data collection plan CSV (target vs. recorded episodes per task/object).
+# Auto-seeded from tasks.yaml and auto-updated as episodes are recorded; target_episodes
+# is left for the user to fill in and is never overwritten automatically.
+DATA_COLLECTION_PLAN_CSV_PATH = DATA_COLLECTION_PLAN_ROOT / "data_collection_plan.csv"
+
+# Path to the human-readable markdown summary, regenerated from the CSV.
+DATA_COLLECTION_PLAN_MD_PATH = DATA_COLLECTION_PLAN_ROOT / "data_collection_plan.md"

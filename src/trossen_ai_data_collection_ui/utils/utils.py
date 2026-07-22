@@ -1,7 +1,10 @@
+import csv
 from dataclasses import dataclass
+from datetime import datetime
 import json
 import logging
 import os
+from pathlib import Path
 import shutil
 from typing import Tuple, Type, Union
 
@@ -222,6 +225,204 @@ def get_recorded_task_stats(repo_id: str) -> dict:
                 last_task = tasks[-1]
 
     return {"counts": counts, "last_task": last_task}
+
+
+PLAN_CSV_FIELDS = [
+    "task_name",
+    "robot_model",
+    "repo_id",
+    "object_variant",
+    "instruction",
+    "target_episodes",
+    "recorded_episodes",
+    "last_recorded_at",
+]
+
+
+def _read_plan_rows(csv_path: Path) -> list[dict]:
+    if not csv_path.exists():
+        return []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _write_plan_rows(csv_path: Path, rows: list[dict]) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    # Write to a temp file first so a crash mid-write can't corrupt the plan.
+    tmp_path = csv_path.with_suffix(".csv.tmp")
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=PLAN_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp_path.replace(csv_path)
+
+
+def init_data_collection_plan(csv_path: Path, tasks_config: dict | None) -> None:
+    """
+    Ensure the data collection plan CSV has one row per task/object-variant
+    combination declared in tasks.yaml. Existing rows (and any target_episodes
+    the user has filled in) are left untouched; only missing combinations are
+    appended. Safe to call every startup and after every task config edit.
+
+    :param csv_path: Path to the plan CSV file.
+    :param tasks_config: Parsed tasks.yaml content (from load_config()).
+    """
+    if not tasks_config or "tasks" not in tasks_config:
+        return
+
+    rows = _read_plan_rows(csv_path)
+    existing_keys = {(row["task_name"], row["object_variant"]) for row in rows}
+
+    for task in tasks_config["tasks"]:
+        task_name = task.get("task_name", "")
+        robot_model = task.get("robot_model", "")
+        hf_user = task.get("hf_user", "")
+        repo_id = f"{hf_user}/{task_name}" if hf_user and task_name else ""
+        template = task.get("task_description", "")
+        if "{object}" in template:
+            objects = task.get("task_objects") or []
+        else:
+            # No {object} placeholder: the whole instruction is the "variant",
+            # matching the key main_window.py uses when logging live episodes.
+            objects = [template]
+
+        # Pick up any episodes already recorded for this repo before the plan
+        # existed (or for a fresh install), so a new row starts accurate
+        # instead of at 0.
+        already_recorded = get_recorded_task_stats(repo_id)["counts"] if repo_id else {}
+
+        for obj in objects:
+            key = (task_name, obj)
+            if key in existing_keys:
+                continue
+            instruction = template.replace("{object}", obj) if "{object}" in template else template
+            rows.append(
+                {
+                    "task_name": task_name,
+                    "robot_model": robot_model,
+                    "repo_id": repo_id,
+                    "object_variant": obj,
+                    "instruction": instruction,
+                    "target_episodes": 0,
+                    "recorded_episodes": already_recorded.get(instruction, 0),
+                    "last_recorded_at": "",
+                }
+            )
+            existing_keys.add(key)
+
+    _write_plan_rows(csv_path, rows)
+
+
+def record_episode_in_plan(
+    csv_path: Path,
+    task_name: str,
+    robot_model: str,
+    repo_id: str,
+    object_variant: str,
+    instruction: str,
+) -> None:
+    """
+    Increment recorded_episodes for the matching (task_name, object_variant)
+    row in the plan CSV, appending a new row if this combination hasn't been
+    seen before. Never touches target_episodes, so user-set goals persist.
+
+    :param csv_path: Path to the plan CSV file.
+    :param task_name: The task's name, as in tasks.yaml.
+    :param robot_model: The task's robot_model, as in tasks.yaml.
+    :param repo_id: The Hugging Face dataset repo id this episode was saved to.
+    :param object_variant: The object/variant string for this episode (may be
+        empty for tasks with no {object} template).
+    :param instruction: The full instruction recorded with this episode.
+    """
+    rows = _read_plan_rows(csv_path)
+    now = datetime.now().isoformat(timespec="seconds")
+
+    for row in rows:
+        if row["task_name"] == task_name and row["object_variant"] == object_variant:
+            row["robot_model"] = robot_model
+            row["repo_id"] = repo_id
+            row["instruction"] = instruction
+            row["recorded_episodes"] = str(int(row.get("recorded_episodes") or 0) + 1)
+            row["last_recorded_at"] = now
+            break
+    else:
+        rows.append(
+            {
+                "task_name": task_name,
+                "robot_model": robot_model,
+                "repo_id": repo_id,
+                "object_variant": object_variant,
+                "instruction": instruction,
+                "target_episodes": 0,
+                "recorded_episodes": 1,
+                "last_recorded_at": now,
+            }
+        )
+
+    _write_plan_rows(csv_path, rows)
+
+
+def render_data_collection_plan_md(csv_path: Path, md_path: Path) -> None:
+    """
+    Regenerate a human-readable markdown summary of the data collection plan
+    CSV: one progress table per task, with per-object target/recorded counts
+    and a grand total. Overwrites md_path entirely each time.
+
+    :param csv_path: Path to the plan CSV file (read-only here).
+    :param md_path: Path to the markdown file to (re)write.
+    """
+    rows = _read_plan_rows(csv_path)
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = ["# Data Collection Plan", ""]
+    lines.append(f"_Last updated: {datetime.now().isoformat(timespec='seconds')}_")
+    lines.append("")
+
+    if not rows:
+        lines.append("No tasks configured yet.")
+    else:
+        task_order: list[str] = []
+        by_task: dict[str, list[dict]] = {}
+        for row in rows:
+            by_task.setdefault(row["task_name"], []).append(row)
+            if row["task_name"] not in task_order:
+                task_order.append(row["task_name"])
+
+        grand_target = 0
+        grand_recorded = 0
+
+        for task_name in task_order:
+            task_rows = by_task[task_name]
+            repo_id = task_rows[0].get("repo_id", "")
+            lines.append(f"## {task_name}")
+            if repo_id:
+                lines.append(f"Repo: `{repo_id}`")
+            lines.append("")
+            lines.append("| Object / Variant | Instruction | Target | Recorded | Last recorded |")
+            lines.append("|---|---|---:|---:|---|")
+
+            task_target = 0
+            task_recorded = 0
+            for row in task_rows:
+                target = int(row.get("target_episodes") or 0)
+                recorded = int(row.get("recorded_episodes") or 0)
+                task_target += target
+                task_recorded += recorded
+                obj = row.get("object_variant") or "_(n/a)_"
+                lines.append(
+                    f"| {obj} | {row.get('instruction', '')} | {target} | {recorded} | "
+                    f"{row.get('last_recorded_at') or '-'} |"
+                )
+            target_display = task_target if task_target else "-"
+            lines.append(f"\n**Task total: {task_recorded}/{target_display}**\n")
+            grand_target += task_target
+            grand_recorded += task_recorded
+
+        lines.append("---")
+        overall_target_display = grand_target if grand_target else "-"
+        lines.append(f"**Overall: {grand_recorded}/{overall_target_display} episodes recorded**")
+
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def remove_corrupted_files(file_path):

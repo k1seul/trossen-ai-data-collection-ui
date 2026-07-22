@@ -54,6 +54,8 @@ import yaml
 from trossen_ai_data_collection_ui.resources.app import Ui_MainWindow
 from trossen_ai_data_collection_ui.resources.calibration_menu import Ui_calibration_menu
 from trossen_ai_data_collection_ui.utils.constants import (
+    DATA_COLLECTION_PLAN_CSV_PATH,
+    DATA_COLLECTION_PLAN_MD_PATH,
     PACKAGE_ROOT,
     TROSSEN_AI_CALIBRATION_CONFIG_PATH_PERSISTENT,
     TROSSEN_AI_ROBOT_PATH_PERSISTENT,
@@ -64,9 +66,12 @@ from trossen_ai_data_collection_ui.utils.utils import (
     create_robot_config,
     get_last_episode_index,
     get_recorded_task_stats,
+    init_data_collection_plan,
     load_config,
     paintEvent,
+    record_episode_in_plan,
     remove_corrupted_files,
+    render_data_collection_plan_md,
     set_image,
 )
 from trossen_ai_data_collection_ui.workers.recorder import RecordWorker
@@ -474,6 +479,12 @@ class MainWindow(QMainWindow):
         logger.info("Loading task configurations")
         self.tasks_config = load_config()  # Load task configurations.
 
+        # Seed/update the data collection plan (CSV + generated markdown summary)
+        # from tasks.yaml. Existing rows and any target_episodes already filled in
+        # are left untouched; only new task/object combinations are added.
+        init_data_collection_plan(DATA_COLLECTION_PLAN_CSV_PATH, self.tasks_config)
+        render_data_collection_plan_md(DATA_COLLECTION_PLAN_CSV_PATH, DATA_COLLECTION_PLAN_MD_PATH)
+
         self.populate_task_combobox()  # Populate the task selection combobox.
 
         # Populate the object/variant combobox for the initially selected task, and
@@ -704,6 +715,8 @@ class MainWindow(QMainWindow):
                     self, "Success", f"Changes saved to {file_path}"
                 )  # Show success message.
                 self.tasks_config = load_config()  # Reload the task configuration.
+                init_data_collection_plan(DATA_COLLECTION_PLAN_CSV_PATH, self.tasks_config)
+                render_data_collection_plan_md(DATA_COLLECTION_PLAN_CSV_PATH, DATA_COLLECTION_PLAN_MD_PATH)
                 self.populate_task_combobox()  # Refresh the task selection combobox.
                 dialog.accept()  # Close the dialog.
             except yaml.YAMLError as e:
@@ -1751,8 +1764,11 @@ class MainWindow(QMainWindow):
         batched_episodes = 0
         # Used to decide, per completed episode, whether to key the live
         # per-object/variant count by the object combobox text or the full
-        # instruction (see the "{object}" in template checks below).
-        template = (self.get_task_parameters(self.selected_task) or {}).get("task_description", "")
+        # instruction (see the "{object}" in template checks below), and to
+        # log completed episodes into the data collection plan.
+        task_config_for_plan = self.get_task_parameters(self.selected_task) or {}
+        template = task_config_for_plan.get("task_description", "")
+        robot_model_for_plan = task_config_for_plan.get("robot_model", "")
         # Recording loop
         try:
             while True:
@@ -1871,6 +1887,18 @@ class MainWindow(QMainWindow):
                     obj_key = episode_instruction
                 self._task_object_counts[obj_key] = self._task_object_counts.get(obj_key, 0) + 1
                 self.update_task_history_summary()
+
+                # Log this episode into the data collection plan (CSV + regenerated
+                # markdown summary), so progress is tracked automatically as you record.
+                record_episode_in_plan(
+                    DATA_COLLECTION_PLAN_CSV_PATH,
+                    task_name=self.selected_task,
+                    robot_model=robot_model_for_plan,
+                    repo_id=cfg.repo_id,
+                    object_variant=obj_key,
+                    instruction=episode_instruction,
+                )
+                render_data_collection_plan_md(DATA_COLLECTION_PLAN_CSV_PATH, DATA_COLLECTION_PLAN_MD_PATH)
 
                 recorded_episodes += 1
                 batched_episodes += 1
