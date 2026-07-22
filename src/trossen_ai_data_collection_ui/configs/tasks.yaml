@@ -1,67 +1,197 @@
 tasks:
-  - task_name: "trossen_ai_solo_dummy"
+  # ===========================================================================
+  # Difficulty Tier 1 (easy): single object type, large forgiving container.
+  # ===========================================================================
+  - task_name: "pick_place_block_bowl"
     robot_model: "trossen_ai_solo"
-    task_description: "A dummy task for the Trossen AI Solo robot."
-    episode_length_s: 10
-    warmup_time_s: 5
-    reset_time_s: 5
-    hf_user: "YourUser"
-    fps: 30
-    display_fps: 1
-    push_to_hub: false
-    play_sounds: true
-    disable_active_ui_updates: false
-    save_interval: 1
-
-  - task_name: "trossen_ai_mobile_dummy"
-    robot_model: "trossen_ai_mobile"
-    task_description: "A dummy task for the Trossen AI Mobile robot."
-    episode_length_s: 10
-    warmup_time_s: 5
-    reset_time_s: 5
-    hf_user: "YourUser"
-    fps: 30
-    display_fps: 1
-    push_to_hub: false
-    play_sounds: true
-    disable_active_ui_updates: false
-    save_interval: 1
-
-  - task_name: "trossen_ai_stationary_dummy"
-    robot_model: "trossen_ai_stationary"
-    task_description: "A dummy task for the Trossen AI Stationary robot."
-    episode_length_s: 10
-    warmup_time_s: 5
-    reset_time_s: 5
-    hf_user: "YourUser"
-    fps: 30
-    display_fps: 1
-    push_to_hub: false
-    play_sounds: true
-    disable_active_ui_updates: false
-    save_interval: 1
-
-  # Example multi-task/multi-object entry. All episodes recorded under this
-  # task_name go into the SAME Hugging Face dataset repo (hf_user/task_name),
-  # but `task_description` uses an {object} placeholder that gets filled in
-  # from the "OBJECT / VARIANT" field in the UI at the start of each episode
-  # (editable between episodes without stopping the session). `task_objects`
-  # is just the dropdown preset list; you can also type any custom value in
-  # that field, it doesn't need to be listed here.
-  - task_name: "trossen_ai_stationary_pick_and_place"
-    robot_model: "trossen_ai_stationary"
-    task_description: "Pick up the {object} and place it in the bin."
+    task_description: "Pick up the {object} and place it in the bowl."
     task_objects:
       - "red block"
       - "blue block"
-      - "green cup"
-    episode_length_s: 10
+      - "green block"
+      - "yellow block"
+      - "purple block"
+    episode_length_s: 15
     warmup_time_s: 5
-    reset_time_s: 5
-    hf_user: "YourUser"
+    reset_time_s: 15
+    hf_user: "k1seul"
     fps: 30
-    display_fps: 1
-    push_to_hub: false
+    display_fps: 30
+    push_to_hub: true
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  # ===========================================================================
+  # Difficulty Tier 2 (easy): same objects, different container (adds
+  # container-shape/visual variety without adding grasp difficulty).
+  # ===========================================================================
+  - task_name: "pick_place_block_pot"
+    robot_model: "trossen_ai_solo"
+    task_description: "Pick up the {object} and place it in the pot."
+    task_objects:
+      - "red block"
+      - "blue block"
+      - "green block"
+      - "yellow block"
+      - "purple block"
+    episode_length_s: 15
+    warmup_time_s: 5
+    reset_time_s: 15
+    hf_user: "k1seul"
+    fps: 30
+    display_fps: 30
+    push_to_hub: true
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  # ===========================================================================
+  # Difficulty Tier 3 (easy-medium): fruit props -- different shapes/sizes
+  # than the wooden blocks, so grasp strategy has to adapt.
+  # ===========================================================================
+  - task_name: "pick_place_fruit_bowl"
+    robot_model: "trossen_ai_solo"
+    task_description: "Pick up the {object} and place it in the bowl."
+    task_objects:
+      - "orange"
+      - "banana"
+      - "apple"
+      - "peach"
+    episode_length_s: 18
+    warmup_time_s: 5
+    reset_time_s: 15
+    hf_user: "k1seul"
+    fps: 30
+    display_fps: 30
+    push_to_hub: true
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  # ===========================================================================
+  # Difficulty Tier 4 (medium): precision placement onto the small stand
+  # instead of dropping into a large bowl -- much smaller target area.
+  # ===========================================================================
+  - task_name: "place_block_on_stand"
+    robot_model: "trossen_ai_solo"
+    task_description: "Pick up the {object} and place it on the stand."
+    task_objects:
+      - "red block"
+      - "blue block"
+      - "green block"
+      - "yellow block"
+      - "purple block"
+    episode_length_s: 18
+    warmup_time_s: 5
+    reset_time_s: 15
+    hf_user: "k1seul"
+    fps: 30
+    display_fps: 30
+    push_to_hub: true
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  # ===========================================================================
+  # Difficulty Tier 5 (medium): stacking -- precise alignment plus a gentle,
+  # controlled release so the stack doesn't topple.
+  # ===========================================================================
+  - task_name: "stack_blocks"
+    robot_model: "trossen_ai_solo"
+    task_description: "Pick up the {object} and stack it on top of the other block."
+    task_objects:
+      - "red block"
+      - "blue block"
+      - "green block"
+      - "yellow block"
+    episode_length_s: 20
+    warmup_time_s: 5
+    reset_time_s: 15
+    hf_user: "k1seul"
+    fps: 30
+    display_fps: 30
+    push_to_hub: true
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  # ===========================================================================
+  # Difficulty Tier 6 (medium-hard): sequential/compound task -- pick two
+  # objects in order within a single episode. This was your own earlier idea
+  # (previously named pick_up_the_red_than_blue_block); it's restored here as
+  # a proper multi-variant task so multiple color pairs share one repo.
+  # ===========================================================================
+  - task_name: "sequential_two_blocks_bowl"
+    robot_model: "trossen_ai_solo"
+    task_description: "{object}"
+    task_objects:
+      - "Pick up the red block and place it in the bowl, then pick up the blue block and place it in the bowl."
+      - "Pick up the blue block and place it in the bowl, then pick up the green block and place it in the bowl."
+      - "Pick up the green block and place it in the bowl, then pick up the yellow block and place it in the bowl."
+      - "Pick up the yellow block and place it in the bowl, then pick up the red block and place it in the bowl."
+    episode_length_s: 35
+    warmup_time_s: 10
+    reset_time_s: 20
+    hf_user: "k1seul"
+    fps: 30
+    display_fps: 30
+    push_to_hub: true
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  # ===========================================================================
+  # Difficulty Tier 7 (hard): clutter/discrimination -- ALL blocks and fruits
+  # are on the mat at once (see protocol doc for scene setup); the robot must
+  # pick only the one named in the instruction and ignore the rest.
+  # ===========================================================================
+  - task_name: "pick_specific_item_from_clutter"
+    robot_model: "trossen_ai_solo"
+    task_description: "Pick up the {object} and place it in the bowl. Do not touch the other items."
+    task_objects:
+      - "red block"
+      - "blue block"
+      - "green block"
+      - "yellow block"
+      - "purple block"
+      - "orange"
+      - "banana"
+      - "apple"
+      - "peach"
+    episode_length_s: 20
+    warmup_time_s: 10
+    reset_time_s: 25
+    hf_user: "k1seul"
+    fps: 30
+    display_fps: 30
+    push_to_hub: true
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  # ===========================================================================
+  # Difficulty Tier 8 (hardest, single-arm): spatial precision using zones
+  # marked on the whiteboard sheet over the cutting mat (see protocol doc for
+  # how to mark zones A/B/C). Tests precise placement at an exact location
+  # rather than "anywhere in a container".
+  # ===========================================================================
+  - task_name: "place_object_in_marked_zone"
+    robot_model: "trossen_ai_solo"
+    task_description: "{object}"
+    task_objects:
+      - "Pick up the red block and place it in zone A."
+      - "Pick up the blue block and place it in zone B."
+      - "Pick up the green block and place it in zone C."
+      - "Pick up the orange and place it in zone A."
+      - "Pick up the banana and place it in zone B."
+    episode_length_s: 20
+    warmup_time_s: 10
+    reset_time_s: 15
+    hf_user: "k1seul"
+    fps: 30
+    display_fps: 30
+    push_to_hub: true
     play_sounds: true
     disable_active_ui_updates: false
     save_interval: 1
