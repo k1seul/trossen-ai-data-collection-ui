@@ -3249,6 +3249,7 @@ RUN</string>
     </property>
     <addaction name="actionRobot_Configuration"/>
     <addaction name="actionTask_Configuration"/>
+    <addaction name="actionNew_Task"/>
    </widget>
    <widget class="QMenu" name="menuQuit">
     <property name="title">
@@ -3273,6 +3274,11 @@ RUN</string>
   <action name="actionTask_Configuration">
    <property name="text">
     <string>Task Configuration</string>
+   </property>
+  </action>
+  <action name="actionNew_Task">
+   <property name="text">
+    <string>New Task...</string>
    </property>
   </action>
   <action name="actionSet_Pose">

@@ -17,11 +17,17 @@ from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QImage, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QComboBox,
     QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -566,6 +572,7 @@ class MainWindow(QMainWindow):
         # Connect menu actions for editing configurations.
         self.ui.actionRobot_Configuration.triggered.connect(self.edit_robot_config)
         self.ui.actionTask_Configuration.triggered.connect(self.edit_task_config)
+        self.ui.actionNew_Task.triggered.connect(self.open_new_task_dialog)
 
         # Connect menu actions for calibration
         self.ui.actionCalibrate.triggered.connect(self.open_calibration_menu)
@@ -743,6 +750,218 @@ class MainWindow(QMainWindow):
         cancel_button.clicked.connect(cancel_changes)
 
         dialog.exec()  # Execute the dialog.
+
+    @staticmethod
+    def _build_task_yaml_block(task: dict) -> str:
+        """
+        Format a single task as an appendable YAML block for tasks.yaml.
+
+        Uses yaml.safe_dump for correct quoting/escaping, then re-indents to
+        match the file's "  - task_name: ..." list style, so it can be
+        appended as raw text without touching (or reformatting/losing
+        comments in) the rest of the file.
+
+        :param task: The task dict to format, in the desired key order.
+        :return: A YAML text block, prefixed with a blank line for spacing.
+        """
+        dumped = yaml.safe_dump({"tasks": [task]}, default_flow_style=False, sort_keys=False)
+        body_lines = dumped.splitlines()[1:]  # Drop the leading "tasks:" line.
+        indented = "\n".join(f"  {line}" for line in body_lines)
+        return f"\n{indented}\n"
+
+    def open_new_task_dialog(self) -> None:
+        """
+        Open a form for creating a new task without hand-editing YAML.
+
+        Appends a new entry to the persistent tasks.yaml (preserving the rest
+        of the file, including comments), reloads the task configuration,
+        refreshes the data collection plan, and selects the new task in
+        TASK SELECTION -- ready to record with no further setup.
+        """
+        logger.info("Opening New Task dialog")
+
+        robot_config_data = load_config(TROSSEN_AI_ROBOT_PATH_PERSISTENT) or {}
+        robot_models = list(robot_config_data.keys())
+        if not robot_models:
+            QMessageBox.critical(
+                self,
+                "Error",
+                "No robots found in the robot configuration. "
+                "Set up Robot Configuration first.",
+            )
+            return
+
+        # Default to whichever hf_user was used most recently, if any, so it
+        # doesn't need to be retyped for every new task.
+        default_hf_user = ""
+        for task in (self.tasks_config or {}).get("tasks", []):
+            if task.get("hf_user"):
+                default_hf_user = task["hf_user"]
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("New Task")
+        dialog.setWindowModality(Qt.ApplicationModal)
+        dialog.resize(520, 560)
+
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        layout.addLayout(form)
+
+        task_name_edit = QLineEdit(dialog)
+        task_name_edit.setPlaceholderText("e.g. pick_place_block_bowl")
+        form.addRow("Task name:", task_name_edit)
+
+        robot_model_combo = QComboBox(dialog)
+        robot_model_combo.addItems(robot_models)
+        if "trossen_ai_solo" in robot_models:
+            robot_model_combo.setCurrentText("trossen_ai_solo")
+        form.addRow("Robot model:", robot_model_combo)
+
+        hf_user_edit = QLineEdit(dialog)
+        hf_user_edit.setText(default_hf_user)
+        form.addRow("Hugging Face user:", hf_user_edit)
+
+        description_edit = QLineEdit(dialog)
+        description_edit.setPlaceholderText("Pick up the {object} and place it in the bowl.")
+        form.addRow("Instruction ({object} = variant slot):", description_edit)
+
+        objects_edit = QPlainTextEdit(dialog)
+        objects_edit.setPlaceholderText(
+            "Optional: one object/variant per line, e.g.\nred block\nblue block"
+        )
+        objects_edit.setFixedHeight(90)
+        form.addRow("Objects / variants:", objects_edit)
+
+        episode_length_spin = QSpinBox(dialog)
+        episode_length_spin.setRange(1, 600)
+        episode_length_spin.setValue(15)
+        form.addRow("Episode length (s):", episode_length_spin)
+
+        warmup_spin = QSpinBox(dialog)
+        warmup_spin.setRange(0, 600)
+        warmup_spin.setValue(5)
+        form.addRow("Warmup time (s):", warmup_spin)
+
+        reset_spin = QSpinBox(dialog)
+        reset_spin.setRange(0, 600)
+        reset_spin.setValue(15)
+        form.addRow("Reset time (s):", reset_spin)
+
+        fps_spin = QSpinBox(dialog)
+        fps_spin.setRange(1, 120)
+        fps_spin.setValue(30)
+        form.addRow("FPS:", fps_spin)
+
+        display_fps_spin = QSpinBox(dialog)
+        display_fps_spin.setRange(0, 120)
+        display_fps_spin.setValue(30)
+        form.addRow("Display FPS:", display_fps_spin)
+
+        save_interval_spin = QSpinBox(dialog)
+        save_interval_spin.setRange(-1, 1000)
+        save_interval_spin.setValue(1)
+        form.addRow("Save interval:", save_interval_spin)
+
+        push_to_hub_check = QCheckBox("Push to Hugging Face Hub automatically", dialog)
+        push_to_hub_check.setChecked(True)
+        form.addRow(push_to_hub_check)
+
+        play_sounds_check = QCheckBox("Play sounds", dialog)
+        play_sounds_check.setChecked(True)
+        form.addRow(play_sounds_check)
+
+        button_row = QHBoxLayout()
+        create_button = QPushButton("Create Task", dialog)
+        cancel_button = QPushButton("Cancel", dialog)
+        button_row.addWidget(create_button)
+        button_row.addWidget(cancel_button)
+        layout.addLayout(button_row)
+
+        def create_task():
+            task_name = task_name_edit.text().strip().replace(" ", "_")
+            if not task_name:
+                QMessageBox.warning(dialog, "Missing task name", "Enter a task name.")
+                return
+            if not re.match(r"^[A-Za-z0-9_-]+$", task_name):
+                QMessageBox.warning(
+                    dialog,
+                    "Invalid task name",
+                    "Task name can only contain letters, numbers, underscores and hyphens.",
+                )
+                return
+            existing_names = {
+                t.get("task_name") for t in (self.tasks_config or {}).get("tasks", [])
+            }
+            if task_name in existing_names:
+                QMessageBox.warning(
+                    dialog, "Duplicate task", f"A task named '{task_name}' already exists."
+                )
+                return
+
+            hf_user = hf_user_edit.text().strip()
+            if not hf_user:
+                QMessageBox.warning(
+                    dialog, "Missing Hugging Face user", "Enter a Hugging Face username."
+                )
+                return
+
+            description = description_edit.text().strip()
+            if not description:
+                QMessageBox.warning(dialog, "Missing instruction", "Enter an instruction.")
+                return
+
+            objects = [
+                line.strip() for line in objects_edit.toPlainText().splitlines() if line.strip()
+            ]
+
+            task = {
+                "task_name": task_name,
+                "robot_model": robot_model_combo.currentText(),
+                "task_description": description,
+                "episode_length_s": episode_length_spin.value(),
+                "warmup_time_s": warmup_spin.value(),
+                "reset_time_s": reset_spin.value(),
+                "hf_user": hf_user,
+                "fps": fps_spin.value(),
+                "display_fps": display_fps_spin.value(),
+                "push_to_hub": push_to_hub_check.isChecked(),
+                "play_sounds": play_sounds_check.isChecked(),
+                "disable_active_ui_updates": False,
+                "save_interval": save_interval_spin.value(),
+            }
+            if objects:
+                task["task_objects"] = objects
+
+            try:
+                block = self._build_task_yaml_block(task)
+                with open(TROSSEN_AI_TASK_PATH_PERSISTENT, "a") as f:
+                    f.write(block)
+                logger.info(f"New task '{task_name}' appended to {TROSSEN_AI_TASK_PATH_PERSISTENT}")
+            except Exception as e:
+                QMessageBox.critical(dialog, "Error", f"Failed to save new task: {e}")
+                return
+
+            self.tasks_config = load_config()
+            init_data_collection_plan(DATA_COLLECTION_PLAN_CSV_PATH, self.tasks_config)
+            render_data_collection_plan_md(DATA_COLLECTION_PLAN_CSV_PATH, DATA_COLLECTION_PLAN_MD_PATH)
+            self.populate_task_combobox()
+            self.ui.comboBox_task_selection.setCurrentText(task_name)
+
+            self.set_logs(
+                f"Created new task '{task_name}'. Select it and click START RECORDING SESSION."
+            )
+            QMessageBox.information(
+                dialog,
+                "Task created",
+                f"'{task_name}' is ready -- repo: {hf_user}/{task_name}\n"
+                "It's now selected in TASK SELECTION; click START RECORDING SESSION to begin.",
+            )
+            dialog.accept()
+
+        create_button.clicked.connect(create_task)
+        cancel_button.clicked.connect(dialog.reject)
+
+        dialog.exec()
 
     def set_rerecord_episode(self) -> None:
         """
