@@ -151,6 +151,23 @@ they're per-machine, constantly-changing progress data rather than program
 source — back them up or copy them into version control yourself if you want
 history of your collection progress over time.
 
+## Teleoperation speed warning
+
+While teleoperating (during warmup, dry run, or an episode), the UI estimates
+the fastest joint's commanded velocity every control loop step (from the
+change in the recorded `action` between consecutive steps, divided by the
+elapsed time) and shows a red **"⚠ MOVING TOO FAST — SLOW DOWN"** banner
+above the camera feeds whenever it exceeds a threshold, clearing
+automatically once you slow back down.
+
+This is a visual heads-up for the operator, not a hardware-enforced safety
+limit — the actual per-step motion is still whatever `max_relative_target`
+in the robot config allows (`null` by default, i.e. unclamped). The
+threshold is configurable per robot in
+`~/.trossen/trossen_ai_data_collection/configs/robot/trossen_ai_robots.yaml`
+via `max_joint_velocity_rad_s` (rad/s); it defaults to `3.5` if unset. Tune
+it to your arm model and comfort level.
+
 ## Updating the `lerobot` dependency
 
 `lerobot` is pulled from `Interbotix/lerobot@trossen-ai` via `[tool.uv.sources]`

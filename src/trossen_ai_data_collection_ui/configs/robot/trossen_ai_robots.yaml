@@ -4,6 +4,12 @@ trossen_ai_stationary:
 
   min_time_to_move_multiplier: 3.0
 
+  # Speed-warning threshold (rad/s) for the fastest joint's apparent commanded
+  # velocity during teleoperation. Shows a visual "MOVING TOO FAST" banner in
+  # the UI above this value; it's a heads-up, not a hardware-enforced limit.
+  # Tune to your arm model/comfort level; omit to use the built-in default.
+  max_joint_velocity_rad_s: 3.5
+
   camera_interface: 'intel_realsense'
 
   leader_arms:
@@ -50,6 +56,12 @@ trossen_ai_mobile:
 
   min_time_to_move_multiplier: 3.0
 
+  # Speed-warning threshold (rad/s) for the fastest joint's apparent commanded
+  # velocity during teleoperation. Shows a visual "MOVING TOO FAST" banner in
+  # the UI above this value; it's a heads-up, not a hardware-enforced limit.
+  # Tune to your arm model/comfort level; omit to use the built-in default.
+  max_joint_velocity_rad_s: 3.5
+
   camera_interface: 'intel_realsense'
 
   leader_arms:
@@ -90,6 +102,12 @@ trossen_ai_solo:
   max_relative_target: null
 
   min_time_to_move_multiplier: 3.0
+
+  # Speed-warning threshold (rad/s) for the fastest joint's apparent commanded
+  # velocity during teleoperation. Shows a visual "MOVING TOO FAST" banner in
+  # the UI above this value; it's a heads-up, not a hardware-enforced limit.
+  # Tune to your arm model/comfort level; omit to use the built-in default.
+  max_joint_velocity_rad_s: 3.5
 
   camera_interface: 'intel_realsense'
 

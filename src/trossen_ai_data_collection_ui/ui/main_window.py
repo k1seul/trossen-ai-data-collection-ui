@@ -79,6 +79,12 @@ from trossen_ai_data_collection_ui.workers.yaml import YamlHighlighter
 
 logger = logging.getLogger(__name__)
 
+# Fallback speed-warning threshold (rad/s) for the fastest joint's apparent
+# commanded velocity during teleoperation, used when a robot's config doesn't
+# set its own `max_joint_velocity_rad_s`. This is a UI heads-up, not a
+# hardware-enforced safety limit -- tune it per robot/arm model as needed.
+DEFAULT_MAX_JOINT_VELOCITY_RAD_S = 3.5
+
 
 def text_to_html(text: str) -> str:
     """
@@ -893,6 +899,51 @@ class MainWindow(QMainWindow):
         )  # Log message if task is not found.
         return None  # Return None if no match is found.
 
+    def get_max_joint_velocity_rad_s(self, robot_model: str) -> float:
+        """
+        Look up the speed-warning threshold (rad/s) for a robot model.
+
+        Reads the optional `max_joint_velocity_rad_s` field from the
+        persistent robot config, falling back to a generic default if the
+        robot or field isn't set.
+
+        :param robot_model: The robot model name, e.g. "trossen_ai_stationary".
+        :return: The threshold in rad/s used to flag teleoperation as too fast.
+        """
+        robot_config_data = load_config(TROSSEN_AI_ROBOT_PATH_PERSISTENT) or {}
+        robot = robot_config_data.get(robot_model) or {}
+        try:
+            return float(robot.get("max_joint_velocity_rad_s", DEFAULT_MAX_JOINT_VELOCITY_RAD_S))
+        except (TypeError, ValueError):
+            return DEFAULT_MAX_JOINT_VELOCITY_RAD_S
+
+    def update_speed_warning(self, max_velocity: float) -> None:
+        """
+        Show or hide the "moving too fast" warning banner.
+
+        :param max_velocity: The fastest joint's apparent commanded velocity
+            (max absolute per-joint delta over dt) for the current control
+            loop iteration, in rad/s. Pass 0.0 to clear the warning.
+        """
+        threshold = getattr(self, "max_joint_velocity_rad_s", DEFAULT_MAX_JOINT_VELOCITY_RAD_S)
+        is_too_fast = max_velocity > threshold
+
+        if is_too_fast != getattr(self, "_speed_warning_active", False):
+            self._speed_warning_active = is_too_fast
+            self.ui.label_speed_warning.setStyleSheet(
+                "background-color: #d62728; color: white; border-radius: 6px;"
+                if is_too_fast
+                else ""
+            )
+
+        if is_too_fast:
+            self.ui.label_speed_warning.setText(
+                f"⚠ MOVING TOO FAST — SLOW DOWN  "
+                f"({max_velocity:.1f} rad/s > {threshold:.1f} rad/s)"
+            )
+        else:
+            self.ui.label_speed_warning.setText("")
+
     @Slot(int)
     def update_progress(self, value: int) -> None:
         """
@@ -1007,6 +1058,11 @@ class MainWindow(QMainWindow):
         self.display_fps = task_config.get("display_fps", 1)
         # Update the UI label to show the camera feed FPS value
         self.ui.label_cameraFeedValue.setText(str(self.display_fps))
+        # Speed-warning threshold for this robot model (see control_loop/update_speed_warning).
+        self.max_joint_velocity_rad_s = self.get_max_joint_velocity_rad_s(
+            task_config.get("robot_model")
+        )
+        self.update_speed_warning(0.0)  # Clear any leftover warning from a previous session.
         # Initialize the robot with the configuration.
         try:
             self.robot = make_robot_from_config(create_robot_config(task_config.get("robot_model")))
@@ -1090,6 +1146,11 @@ class MainWindow(QMainWindow):
         self.display_fps = task_config.get("display_fps", 1)
         # Update the UI label to show the camera feed FPS value
         self.ui.label_cameraFeedValue.setText(str(self.display_fps))
+        # Speed-warning threshold for this robot model (see control_loop/update_speed_warning).
+        self.max_joint_velocity_rad_s = self.get_max_joint_velocity_rad_s(
+            task_config.get("robot_model")
+        )
+        self.update_speed_warning(0.0)  # Clear any leftover warning from a previous session.
         # Initialize the robot with the configuration.
         try:
             self.robot = make_robot_from_config(create_robot_config(task_config.get("robot_model")))
@@ -1528,11 +1589,27 @@ class MainWindow(QMainWindow):
         # Flag to track whether we should update the display on this iteration (used for throttling)
         should_update_display = False
 
+        # Previous commanded action and its timestamp, used to estimate per-joint
+        # velocity between consecutive teleoperation steps for the speed warning.
+        prev_action = None
+        prev_action_t = None
+
         while timestamp < control_time_s:  # Run the loop until the specified control time.
             start_loop_t = time.perf_counter()  # Record the loop start time.
 
             if teleoperate:  # Perform teleoperation if enabled.
                 observation, action = robot.teleop_step(record_data=True)
+
+                # Estimate the fastest joint's commanded velocity since the last step
+                # and flag it visually if it's moving too fast (see update_speed_warning).
+                action_t = time.perf_counter()
+                if prev_action is not None:
+                    dt_action = action_t - prev_action_t
+                    if dt_action > 0:
+                        max_velocity = float((action["action"] - prev_action).abs().max() / dt_action)
+                        self.update_speed_warning(max_velocity)
+                prev_action = action["action"]
+                prev_action_t = action_t
 
             if dataset is not None:  # Record data into the dataset if provided.
                 frame = {**observation, **action, "task": single_task}
@@ -1580,6 +1657,9 @@ class MainWindow(QMainWindow):
             if events["exit_early"]:
                 events["exit_early"] = False
                 break
+
+        if teleoperate:
+            self.update_speed_warning(0.0)  # Clear the warning once teleoperation stops.
 
     def log_control_info(
         self,
