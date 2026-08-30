@@ -10,7 +10,7 @@ on top that can be marked for fixed positions/zones. (The small stand prop
 is no longer used by the curriculum below.)
 
 Block colors: **red, blue, green, yellow** (confirmed — no purple).
-Tape colors: **red, orange, yellow, green, purple** (5 colors).
+Tape colors: **red, blue, green, purple, yellow** (5 colors).
 
 ## Curriculum (easy → hard)
 
@@ -23,7 +23,7 @@ individually via lerobot's per-episode task metadata (not separate repos).
 | 1 — Easy | `pick_place_block_bowl` | "Pick up the {color} block and place it in the bowl." | 4 colors | Single object type, large forgiving target |
 | 2 — Easy | `pick_place_block_pot` | "...place it in the pot." | 4 colors | Same skill, adds container-shape variety |
 | 3 — Easy-medium | `pick_place_fruit_bowl` | "Pick up the {fruit} and place it in the bowl." | 4 fruits | Different shapes/sizes force grasp adaptation |
-| 4 — Medium | `stack_blocks` | "Pick up the {A} tape and stack it on top of the {B} tape." (full sentence per pair, both colors always named explicitly) | 5 ordered tape-color pairs | Precise alignment + gentle release; unambiguous pick/base pairing |
+| 4 — Medium | `stack_tapes` | "Pick up the {A} tape and stack it on top of the {B} tape." (full sentence per pair, both colors always named explicitly) | 5 ordered tape-color pairs (minimal cycle, not all 20 combos) | Precise alignment + gentle release; unambiguous pick/base pairing |
 | 5 — Medium-hard | `sequential_two_blocks_bowl` | "Pick up A ... then pick up B ..." (full sentence per variant) | 4 ordered pairs | Two-step compound task in one episode |
 | 6 — Hard | `pick_specific_item_from_clutter` | "Pick up the {item} ... Do not touch the other items." | 8 items (blocks+fruit) | All props on the mat at once — discrimination |
 | 7 — Hardest | `place_object_in_marked_zone` | "Pick up A and place it in zone X." (full sentence per variant) | 5 combos | Precise spatial placement at a marked location, not "anywhere in a container" |

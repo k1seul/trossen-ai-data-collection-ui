@@ -77,18 +77,20 @@ tasks:
   # Difficulty Tier 4 (medium): stacking colored tape rolls -- precise
   # alignment plus a gentle, controlled release so the stack doesn't topple.
   # Both the picked and base tape colors are named explicitly in each
-  # instruction (not "the other one"), since there are 5 tape colors on hand
-  # and the pairing must be unambiguous.
+  # instruction (not "the other one"). 5 tape colors on hand (red, blue,
+  # green, purple, yellow); rather than all 20 possible ordered pairs, this
+  # covers just a minimal rotating cycle where every color appears once as
+  # the picked tape and once as the base.
   # ===========================================================================
-  - task_name: "stack_blocks"
+  - task_name: "stack_tapes"
     robot_model: "trossen_ai_solo"
     task_description: "{object}"
     task_objects:
-      - "Pick up the red tape and stack it on top of the orange tape."
-      - "Pick up the orange tape and stack it on top of the yellow tape."
-      - "Pick up the yellow tape and stack it on top of the green tape."
+      - "Pick up the red tape and stack it on top of the blue tape."
+      - "Pick up the blue tape and stack it on top of the green tape."
       - "Pick up the green tape and stack it on top of the purple tape."
-      - "Pick up the purple tape and stack it on top of the red tape."
+      - "Pick up the purple tape and stack it on top of the yellow tape."
+      - "Pick up the yellow tape and stack it on top of the red tape."
     episode_length_s: 20
     warmup_time_s: 5
     reset_time_s: 15
