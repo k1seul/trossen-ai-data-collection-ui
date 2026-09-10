@@ -65,6 +65,11 @@ def main() -> None:
                    default=Path(__file__).resolve().parents[1]
                    / "src/trossen_ai_data_collection_ui/configs/tasks.yaml")
     p.add_argument("--lighting", nargs="+", default=LIGHTING)
+    p.add_argument("--distractors", type=int, default=2,
+                   help="other blocks on the mat besides the named one. With a single object "
+                        "present the instruction carries no information -- there is only one "
+                        "thing to pick -- so the policy never has to read it, and holding out "
+                        "a colour later would measure nothing. 0 reproduces the old scenes.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--csv", type=Path, default=None)
     a = p.parse_args()
@@ -83,17 +88,26 @@ def main() -> None:
     for v in variants:
         for obj, con in rs:
             for k in range(a.episodes):
+                others = [o for o in variants if o != v]
+                rng.shuffle(others)
+                picked = others[: a.distractors]
+                # The distractors occupy zones too, so which zone is occupied cannot give away
+                # which block is the target. They keep clear of the container's zone.
+                free = [z for z in ZONES if z != con]
+                dz = [free[i % len(free)] for i in range(len(picked))]
+                rng.shuffle(dz)
                 rows.append({"variant": v, "object_zone": obj, "container_zone": con,
                              "route": f"{obj}->{con}",
+                             "distractors": "; ".join(f"{o.split()[0]}@{z}"
+                                                      for o, z in zip(picked, dz)) or "(none)",
                              "lighting": a.lighting[k % len(a.lighting)],
                              "start_nudge": rng.choice(NUDGES)})
     rng.shuffle(rows)                      # order of recording only; the design is already set
+    order = ["variant", "episode", "object_zone", "container_zone", "route",
+             "distractors", "lighting", "start_nudge"]
     for i, r in enumerate(rows, 1):
         r["episode"] = i
-    for r in rows:
-        r_order = ["variant", "episode", "object_zone", "container_zone", "route",
-                   "lighting", "start_nudge"]
-    rows = [{k: r[k] for k in r_order} for r in rows]
+    rows = [{k: r[k] for k in order} for r in rows]
 
     print(f"\n{a.task}: {len(variants)} objects x {len(rs)} routes x {a.episodes} = "
           f"{len(rows)} episodes")
@@ -101,12 +115,13 @@ def main() -> None:
           f"later, on the data)")
     print(f"zones: L / C / R across the mat, boundaries at -0.22 and +0.22 rad shoulder\n")
 
-    hdr = (f"{'variant':<10} {'ep':>4} {'object':>7} {'container':>10} {'route':>7}  "
-           f"{'lighting':<26} start")
+    hdr = (f"{'target':<13} {'ep':>4} {'obj':>4} {'bowl':>5} {'route':>7}  "
+           f"{'also on the mat':<22} {'lighting':<28} start")
     print(hdr); print("-" * len(hdr))
     for r in rows[:16]:
-        print(f"{r['variant']:<10} {r['episode']:>4} {r['object_zone']:>7} "
-              f"{r['container_zone']:>10} {r['route']:>7}  {r['lighting']:<26} {r['start_nudge']}")
+        print(f"{r['variant']:<13} {r['episode']:>4} {r['object_zone']:>4} "
+              f"{r['container_zone']:>5} {r['route']:>7}  {r['distractors']:<22} "
+              f"{r['lighting']:<28} {r['start_nudge']}")
     if len(rows) > 16:
         print(f"... {len(rows) - 16} more (use --csv for the whole sheet)")
 

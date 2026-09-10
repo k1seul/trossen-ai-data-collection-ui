@@ -40,6 +40,24 @@ afterwards, keeps them separable and lets the same data answer several questions
 
 What collection has to deliver instead is **coverage** and **decorrelation**.
 
+### Put more than one block on the mat
+
+With a single object present, the instruction carries no information — there is only one thing
+to pick, so the policy never has to read "red". Every existing block recording is like this,
+which means holding out a colour later would measure nothing at all.
+
+The sheet places **two distractor blocks** each episode (`--distractors`), in zones that keep
+clear of the container, so which zone is occupied gives nothing away either. The instruction
+then has to do real work, and "unseen colour" becomes a genuine OOD axis rather than a label.
+
+### The container moves. That is the point.
+
+**Do not fix the bowl.** It never moving is precisely what broke the previous round: the policy
+learned each task's container position as part of the task, so "banana" came to mean "carry
+right" and staging the bowl on the other side made it place into empty table. The six routes
+exist to move it. Its zone is drawn independently of the target block, and the sheet checks that
+the two have not become correlated.
+
 ### Coverage: every route, every condition, every object
 
 The object and the container each go in a zone, never the same one, giving six routes. **Record
@@ -78,12 +96,13 @@ Both checks print with the sheet; both should read 0.00.
 python scripts/staging_plan.py --task pick_place_fruit_bowl --episodes 6 --csv sheet.csv
 ```
 
-4 objects x 6 routes x 6 episodes = **144 episodes**, a little more than the previous 120 and
-spread over every route instead of two. At ~16.5 s of motion plus the reset, budget about 35 s
-per episode: roughly 85 minutes of cycle time, so a half-day session with staging changes.
+4 colours x 6 routes x 6 episodes = **144 episodes**. At ~20 s of motion plus the reset and
+placing three blocks, budget about 50 s per episode: roughly **2 hours of cycle time**, so a
+full session.
 
-Fewer episodes per cell is fine as long as every cell is filled — `--episodes 4` is 96 episodes
-and still covers everything. An empty cell is what cannot be fixed later.
+`--episodes 4` is 96 episodes and about 80 minutes, and still fills every cell. **The sheet is
+shuffled, so stopping early leaves coverage roughly balanced** — record in the order given and
+stop when you have to. An empty cell is the only thing that cannot be fixed later.
 
 Record it all into **one** repo id. The splits come afterwards:
 
