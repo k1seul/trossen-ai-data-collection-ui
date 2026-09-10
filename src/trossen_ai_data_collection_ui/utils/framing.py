@@ -44,6 +44,10 @@ class Framing:
     reference: np.ndarray  # grayscale
     crop: tuple[int, int, int] | None  # x, y, side
     frame: tuple[int, int] | None  # w, h the crop was measured on
+    # Rows above this are not the staging area. The corner marks are where the arm was pushed
+    # to, so nothing can be staged beyond them, and everything above is furniture -- which is
+    # the pot's hue with more saturation and would otherwise be read as yellow props.
+    table_top: int = 0
 
     @classmethod
     def load(cls, reference_path: Path, workspace_path: Path) -> "Framing | None":
@@ -53,6 +57,7 @@ class Framing:
         if img is None:
             return None
         crop = size = None
+        top = 0
         wp = Path(workspace_path)
         if wp.exists():
             try:
@@ -61,9 +66,15 @@ class Framing:
                 crop = (int(c[0]), int(c[1]), int(c[2])) if c else None
                 f = meta.get("frame")
                 size = (int(f[0]), int(f[1])) if f else None
+                # "highest" is the gripper's lift, not a place an object can go, so it must not
+                # drag the boundary up into the furniture.
+                ys = [float(m["y"]) for m in meta.get("marks", [])
+                      if m.get("name") != "highest" and "y" in m]
+                if ys:
+                    top = int(min(ys))
             except (ValueError, TypeError, KeyError):
                 pass
-        return cls(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), crop, size)
+        return cls(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), crop, size, top)
 
 
 def rigid_shift(ref_gray: np.ndarray, cur_gray: np.ndarray) -> tuple[float, float, float]:
@@ -159,7 +170,11 @@ PROP_HUES = {
     "red": [((0, 110, 60), (10, 255, 255)), ((170, 110, 60), (179, 255, 255))],
     "blue": [((95, 110, 50), (130, 255, 255))],
     "green": [((45, 70, 40), (85, 255, 255))],
-    "yellow": [((20, 110, 90), (35, 255, 255))],
+    # Widened for masking tape, whose ring measures H 19-22 with S down to 62 -- the original
+    # gate wanted S >= 110 and missed it entirely. Widening it this far reaches the wooden
+    # furniture and the gold pot as well, which is why props are now confined to the staging
+    # area and excluded from the containers' own footprints.
+    "yellow": [((15, 55, 90), (38, 255, 255))],
 }
 
 
@@ -236,9 +251,18 @@ def zone_of(cx: float, crop: "tuple[int, int, int] | None", frame_w: int = 640) 
     return "L" if t < 1 / 3 else ("C" if t < 2 / 3 else "R")
 
 
-def identify_props(rgb: np.ndarray, crop: "tuple[int, int, int] | None") -> list[dict]:
-    """Every block and tape roll in frame, with its colour, kind and zone."""
+def identify_props(rgb: np.ndarray, crop: "tuple[int, int, int] | None",
+                   skip_top: int = 0, exclude: "list[dict] | None" = None) -> list[dict]:
+    """Every block and tape roll in the staging area, with its colour, kind and zone.
+
+    skip_top drops the rows above the staging area, and exclude drops the containers' own
+    footprints. Both are needed once the yellow gate is wide enough to see masking tape: the
+    wooden furniture behind the arm and the gold pot both fall inside it, and the pot being a
+    ring would be reported as a large yellow tape roll.
+    """
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    boxes = [(c["x"] - c["w"] / 2, c["y"] - c["h"] / 2, c["w"], c["h"])
+             for c in (exclude or [])]
     found = []
     for name, ranges in PROP_HUES.items():
         m = np.zeros(hsv.shape[:2], np.uint8)
@@ -253,6 +277,10 @@ def identify_props(rgb: np.ndarray, crop: "tuple[int, int, int] | None") -> list
             w, h = int(st[i, cv2.CC_STAT_WIDTH]), int(st[i, cv2.CC_STAT_HEIGHT])
             fill = area / max(w * h, 1)
             cx, cy = float(ce[i][0]), float(ce[i][1])
+            if cy < skip_top:
+                continue
+            if any(bx <= cx <= bx + bw and by <= cy <= by + bh for bx, by, bw, bh in boxes):
+                continue
             kind = "block" if fill >= PROP_FILL_THRESHOLD else "tape roll"
             inside = True
             if crop:
@@ -264,34 +292,137 @@ def identify_props(rgb: np.ndarray, crop: "tuple[int, int, int] | None") -> list
     return found
 
 
+# Containers are not props and cannot be found the same way. A gold pot is a hue the table
+# does not have; a clear bowl is almost exactly the table, and what gives it away is its bright
+# white base. Both are judged RELATIVE to the table rather than against fixed numbers, because
+# the staging sheet changes the lighting every episode by design and any absolute threshold
+# would hold under condition A and fail under C.
+CONTAINER_MIN_AREA = 700          # a tape roll is ~1800 at the rim but not round-and-bright
+# A bowl measures ~2500 and a pot ~5000 here. The cap is what stops a brightness threshold that
+# has drifted low from returning the tablecloth as one enormous round bright object, which is
+# exactly what it did when the staging-area boundary moved twenty rows.
+CONTAINER_MAX_AREA = 12000
+CONTAINER_ASPECT = (0.55, 1.8)    # both containers are near-circular from this angle
+POT_HUE = (14, 36)                # gold; the wooden cabinet is redder and far more saturated
+POT_SAT_MAX = 130
+# Gold and yellow are the same hue, so a yellow tape roll passes the pot's colour test. Size is
+# what separates them and shape is not: the closing that joins the pot's rim to its body also
+# fills the tape's hole, so both come out solid. Measured here, the pot is 5000 px and a tape
+# ring about 1000.
+POT_MIN_AREA = 2500
+
+
+def _table_reference(hsv: np.ndarray, crop: "tuple[int,int,int] | None",
+                     skip_top: int) -> "tuple[float, float]":
+    """Median value and saturation of the mat, to judge everything else against."""
+    h, w = hsv.shape[:2]
+    if crop:
+        x, y, side = crop
+        x0, x1 = max(0, x), min(w, x + side)
+        y0, y1 = max(skip_top, y), min(h, y + side)
+    else:
+        x0, x1, y0, y1 = 0, w, skip_top, h
+    patch = hsv[y0:y1, x0:x1]
+    if patch.size == 0:
+        return 150.0, 10.0
+    return float(np.median(patch[:, :, 2])), float(np.median(patch[:, :, 1]))
+
+
+def find_containers(rgb: np.ndarray, crop: "tuple[int,int,int] | None",
+                    skip_top: int = 130) -> list[dict]:  # noqa: D401
+    """The bowl and the pot, with their zones.
+
+    skip_top drops the rows above the table edge. The furniture behind the arm is wood, which
+    is the pot's hue with more saturation, and the gripper carries bright white pads -- both
+    would be read as containers from a mask alone.
+    """
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    h, w = hsv.shape[:2]
+    table_v, table_s = _table_reference(hsv, crop, skip_top)
+    roi = np.zeros((h, w), np.uint8)
+    if crop:
+        x, y, side = crop
+        roi[max(skip_top, y):min(h, y + side), max(0, x):min(w, x + side)] = 255
+    else:
+        roi[skip_top:, :] = 255
+
+    V = hsv[:, :, 2].astype(np.int16)
+    S = hsv[:, :, 1].astype(np.int16)
+    # The bowl is nearly the table: clear walls, and only its white base separates it. A fixed
+    # multiple of the table's brightness is too brittle for that -- a small drift in the
+    # reference turns the whole mat into one blob -- so the threshold is also held at a high
+    # percentile of the staging area, which caps how much of the frame can ever pass.
+    inside = V[roi > 0]
+    floor = float(np.percentile(inside, 97)) if inside.size else 255.0
+    bowl_v = max(table_v * 1.12, floor)
+    masks = {
+        "pot": cv2.inRange(hsv, np.array((POT_HUE[0], int(table_s) + 20, 60)),
+                           np.array((POT_HUE[1], POT_SAT_MAX, 255))),
+        "bowl": (((V > bowl_v) & (S < table_s + 30)).astype(np.uint8) * 255),
+    }
+    out = []
+    for name, m in masks.items():
+        m = cv2.bitwise_and(m, roi)
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((11, 11), np.uint8))
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+        n, _, st, ce = cv2.connectedComponentsWithStats(m, 8)
+        for i in range(1, n):
+            area = int(st[i, cv2.CC_STAT_AREA])
+            if not CONTAINER_MIN_AREA <= area <= CONTAINER_MAX_AREA:
+                continue
+            if name == "pot" and area < POT_MIN_AREA:
+                continue                      # a yellow tape roll, not the pot
+            bw, bh = int(st[i, cv2.CC_STAT_WIDTH]), int(st[i, cv2.CC_STAT_HEIGHT])
+            if not (CONTAINER_ASPECT[0] <= bw / max(bh, 1) <= CONTAINER_ASPECT[1]):
+                continue
+            cx, cy = float(ce[i][0]), float(ce[i][1])
+            out.append({"object": name, "kind": "container", "x": cx, "y": cy,
+                        "w": bw, "h": bh, "area": area, "zone": zone_of(cx, crop),
+                        "inside_crop": True})
+    # One of each at most: the biggest blob wins, since a highlight on the mat can pass the
+    # bowl's test but never beats the bowl itself.
+    best = {}
+    for c in out:
+        if c["object"] not in best or c["area"] > best[c["object"]]["area"]:
+            best[c["object"]] = c
+    return list(best.values())
+
+
 def verify_scene(expected: list[dict], rgb: np.ndarray,
-                 crop: "tuple[int, int, int] | None") -> tuple[bool, list[tuple[str, str]]]:
+                 crop: "tuple[int, int, int] | None",
+                 skip_top: int = 130) -> tuple[bool, list[tuple[str, str]]]:
     """Compare the staged scene against what the camera can actually see.
 
     Returns (everything matches, [(status, line)]). Containers are not judged: a white bowl on
     a white mat is not something colour segmentation should be trusted to find, and a wrong
     answer about it would cost more than no answer.
     """
-    seen = identify_props(rgb, crop)
+    containers = find_containers(rgb, crop, skip_top=skip_top)
+    seen = identify_props(rgb, crop, skip_top=skip_top, exclude=containers) + containers
     unmatched = list(seen)
     lines, ok = [], True
     for want in expected:
         name = (want.get("object") or "").lower()
-        kind = "tape roll" if "tape" in name else ("block" if "block" in name else None)
-        colour = next((c for c in PROP_HUES if c in name), None)
-        if kind is None or colour is None:
-            lines.append(("skip", f"{want.get('object')} -- by eye "
-                                  f"(expected zone {want.get('zone')})"))
-            continue
+        if name in ("bowl", "pot"):
+            kind, colour, match = "container", None, lambda s: s["object"] == name
+        else:
+            kind = "tape roll" if "tape" in name else ("block" if "block" in name else None)
+            colour = next((c for c in PROP_HUES if c in name), None)
+            if kind is None or colour is None:
+                lines.append(("skip", f"{want.get('object')} -- by eye "
+                                      f"(expected zone {want.get('zone')})"))
+                continue
+
+            def match(s, _c=colour, _k=kind):
+                return s.get("colour") == _c and s["kind"] == _k
+
         hit = next((s for s in unmatched
-                    if s["colour"] == colour and s["kind"] == kind
-                    and s["zone"] == want.get("zone")), None)
+                    if match(s) and s["zone"] == want.get("zone")), None)
         if hit is not None:
             unmatched.remove(hit)
             lines.append(("ok", f"{want['object']} in {want['zone']}"))
             continue
-        wrong = next((s for s in unmatched
-                      if s["colour"] == colour and s["kind"] == kind), None)
+        wrong = next((s for s in unmatched if match(s)), None)
         ok = False
         if wrong is not None:
             unmatched.remove(wrong)
@@ -302,6 +433,13 @@ def verify_scene(expected: list[dict], rgb: np.ndarray,
             lines.append(("missing", f"{want['object']}: not found -- should be in "
                                      f"{want['zone']}"))
     for extra in unmatched:
+        if extra["kind"] == "container":
+            # A container nobody asked for is usually the other one left on the mat, which
+            # matters, but it is also the detection most likely to be a highlight on the
+            # tablecloth -- so it is reported without failing the scene.
+            lines.append(("note", f"{extra['object']} seen in {extra['zone']}, "
+                                  f"not part of this episode"))
+            continue
         ok = False
         lines.append(("extra", f"{extra['object']} in {extra['zone']} is not in this episode"))
     return ok, lines
