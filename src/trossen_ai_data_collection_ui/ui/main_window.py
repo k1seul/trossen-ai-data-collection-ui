@@ -608,6 +608,7 @@ class MainWindow(QMainWindow):
         # the check reports that it has nothing to compare against, rather than blocking a
         # session over a missing file.
         self.framing = framing_utils.Framing.load(FRAMING_REFERENCE, FRAMING_WORKSPACE)
+        self.staging_active = False   # zone letters are drawn only while the gate is open
         # Resolved by name in update_camera_labels. Left unset until then: index 0 is not
         # reliably the main view, and drawing the crop over the wrist feed would mislead the
         # operator about where an object has to be staged.
@@ -1313,6 +1314,11 @@ class MainWindow(QMainWindow):
                 # no way to notice.
                 self.last_main_frame = image
                 bgr_image = framing_utils.draw_crop(bgr_image, self.framing.crop)
+                # Only while a scene is being staged. During an episode the letters would be
+                # clutter over the thing being watched, and the zones are settled by then.
+                if getattr(self, "staging_active", False):
+                    bgr_image = framing_utils.draw_zones(
+                        bgr_image, self.framing.crop, self.framing.table_top)
                 # Blob detection every frame would cost more than it is worth at 30 fps, and a
                 # prop that leaves the crop stays out until somebody moves it, so a few times a
                 # second is as good as every frame. The result is held between checks so the
@@ -1320,6 +1326,7 @@ class MainWindow(QMainWindow):
                 self._framing_tick = getattr(self, "_framing_tick", 0) + 1
                 if self._framing_tick % 8 == 0:
                     self.strays = framing_utils.outside_crop(image, self.framing.crop)
+                self.strays = [s for s in self.strays if s[2] >= self.framing.table_top]
                 bgr_image = framing_utils.draw_outside(bgr_image, getattr(self, "strays", []))
             self.camera_widgets[index].set_image(bgr_image)  # Update the image in the widget.
 
@@ -2212,9 +2219,13 @@ class MainWindow(QMainWindow):
         # G still works, so the habit built during earlier sessions is not broken.
         QShortcut(QKeySequence("G"), dialog).activated.connect(go)
         self._gate_dialog = dialog
+        # The main feed is far larger than this preview, so the letters go on both: props get
+        # placed by looking at the big picture, not at a thumbnail beside a checklist.
+        self.staging_active = True
         self._refresh_setup_gate()
         dialog.exec()
         timer.stop()
+        self.staging_active = False
         self._gate_dialog = None
         if row is not None:
             self._last_staged_row = row
@@ -2234,7 +2245,7 @@ class MainWindow(QMainWindow):
         crop = self.framing.crop
         strays = framing_utils.outside_crop(frame, crop)
         vis = framing_utils.draw_crop(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), crop)
-        vis = framing_utils.draw_zones(vis, crop)
+        vis = framing_utils.draw_zones(vis, crop, self.framing.table_top)
         # Label what the checker believes it is looking at. When it disagrees with the
         # operator, the argument is settled by reading the labels rather than by trusting
         # either -- a tape roll read as a block would otherwise look like a missing object.
@@ -2258,7 +2269,8 @@ class MainWindow(QMainWindow):
             self.gate_status.setText(msg)
             self.gate_status.setStyleSheet("")
             return
-        ok, lines = framing_utils.verify_scene(expected, frame, crop)
+        ok, lines = framing_utils.verify_scene(expected, frame, crop,
+                                               skip_top=self.framing.table_top)
         icon = {"ok": "OK   ", "wrong": "WRONG", "missing": "MISS ", "extra": "EXTRA",
                 "skip": "eye  "}
         body = "\n".join(f"{icon[s]}  {line}" for s, line in lines)

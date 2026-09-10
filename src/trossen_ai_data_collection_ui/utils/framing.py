@@ -445,19 +445,45 @@ def verify_scene(expected: list[dict], rgb: np.ndarray,
     return ok, lines
 
 
-def draw_zones(bgr: np.ndarray, crop: "tuple[int, int, int] | None") -> np.ndarray:
-    """The L / C / R boundaries the check uses, so objects can be placed against them."""
+# Boundaries and letters only, no wash of colour over the bands. A 12% tint was enough to move
+# a green block's detected centroid across a boundary when the detector was pointed at the
+# drawn frame -- the real path reads the raw one, but leaving a version of the scene in which
+# the answer differs is a trap for whoever wires the next thing up.
+
+
+def draw_zones(bgr: np.ndarray, crop: "tuple[int, int, int] | None",
+               top: int = 0) -> np.ndarray:
+    """The L / C / R bands, labelled, so objects can be placed without measuring anything.
+
+    Drawn only while a scene is being staged. During an episode it would be clutter over the
+    thing the operator is actually watching, and the zones are settled by then anyway.
+
+    top is the staging area's near edge; the letters sit inside the band an object can occupy
+    rather than at the bottom of the crop, which is mat nobody reaches.
+    """
     if not crop:
         return bgr
     x, y, side = crop
-    h = bgr.shape[0]
+    h, w = bgr.shape[:2]
+    y0 = max(y, top)
+    y1 = min(h, y + side)
+    if y1 <= y0:
+        return bgr
+
     for k in (1, 2):
         px = int(x + side * k / 3)
-        cv2.line(bgr, (px, max(0, y)), (px, min(h, y + side)), (120, 120, 120), 1)
+        cv2.line(bgr, (px, y0), (px, y1), (255, 255, 255), 2)
+        cv2.line(bgr, (px, y0), (px, y1), (60, 60, 60), 1)
+
+    # Twice, top and bottom of the band: the arm stands in the middle of the frame and hides
+    # whichever one is behind it.
     for k, label in enumerate("LCR"):
         px = int(x + side * (k + 0.5) / 3)
-        cv2.putText(bgr, label, (px - 6, min(h - 8, y + side - 30)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (160, 160, 160), 2)
+        for py in (y0 + 40, y1 - 18):
+            cv2.putText(bgr, label, (px - 16, py), cv2.FONT_HERSHEY_SIMPLEX, 1.2,
+                        (0, 0, 0), 5)
+            cv2.putText(bgr, label, (px - 16, py), cv2.FONT_HERSHEY_SIMPLEX, 1.2,
+                        (255, 255, 255), 2)
     return bgr
 
 
