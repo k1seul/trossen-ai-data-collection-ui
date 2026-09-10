@@ -94,6 +94,42 @@ python real_robot/ood_split.py --repo-id ... --hold-out task:banana --out object
 python real_robot/ood_split.py --repo-id ... --hold-out "brightness:<112" --out light_split.json
 ```
 
+## The round fruits are near the gripper's limit
+
+Measured from the demonstrations — the gripper opening while carrying is the object's width at
+the jaws, and the widest the jaws were ever commanded is 43 mm:
+
+| object | width held | of the 43 mm opening | clearance per side |
+|---|---|---|---|
+| apple | 36.4 mm | 85% | **3.3 mm** |
+| orange | 35.7 mm | 83% | **3.7 mm** |
+| peach | 34.0 mm | 79% | **4.5 mm** |
+| banana | 10.2 mm | 24% | 16.4 mm |
+
+The policy's own joint errors on held-out frames are 0.024–0.030 rad on the two joints that
+carry the gripper laterally, which at a 30–40 cm reach is roughly **7–12 mm** at the jaws. That
+is two to three times the clearance the round fruits leave, and well inside the banana's. The
+teleoperator closes a loop with their eyes at millimetre scale; the policy does not.
+
+Two things follow, and they pull in different directions:
+
+**Demonstrate the miss.** With a tolerance the policy cannot reliably hit, a failed grasp is not
+an exception, it is the normal case. The demonstrations must show what to do about it: jaws
+close on nothing or knock the fruit, **reopen, back off, re-approach, grasp**. All 120 existing
+episodes are clean first-try successes, so the policy has never seen the state it spends most of
+its time in.
+
+**Consider smaller props for the round fruits.** If the point of this round is spatial and
+semantic generalization, a grasp needing millimetre precision becomes the dominant failure mode
+and it affects `baseline`, `vision` and `special` alike — so it adds noise to exactly the
+comparison the experiment exists to make. At ten trials per arm, a grasp that succeeds a third
+of the time regardless of arm cannot distinguish them. A ~25 mm prop leaves 9 mm per side,
+inside what the policy can hit, and the OOD axes stay measurable.
+
+Keeping the large fruits is a legitimate choice — it is the harder, more realistic task — but
+then **report per-object success separately**, so a grasp bottleneck is not read as a difference
+between arms.
+
 ## The release: give it slack
 
 This is what the trained policy is failing on right now — it picks the fruit up, carries it, and
@@ -176,5 +212,6 @@ the choice to use it is not blocked by half the datasets lacking it.
 - [ ] Brightness spread across episodes is several units, not near 1 (one condition)
 - [ ] The release basin report is "wide enough", not "NARROW"
 - [ ] At least a few episodes contain a recovered grasp, and some a second placement attempt
+- [ ] For the round fruits especially: misses are demonstrated, not re-recorded away
 - [ ] Episodes end when the task ends: lengths should vary, not all be 18 s
 - [ ] Everything is in one repo id — the splits are made later, not by separate recordings
