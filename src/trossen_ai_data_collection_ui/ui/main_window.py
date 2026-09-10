@@ -2170,7 +2170,14 @@ class MainWindow(QMainWindow):
                 "staging_raw": dict(row),
             }
             EPISODE_CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
-            path = EPISODE_CONFIG_ROOT / f"{self.selected_task}_{int(episode_idx):05d}.json"
+            stem = f"{self.selected_task}_{int(episode_idx):05d}"
+            frame = getattr(self, "_episode_start_frame", None)
+            if frame is not None:
+                shot = EPISODE_CONFIG_ROOT / f"{stem}_start.png"
+                cv2.imwrite(str(shot), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+                rec["start_frame"] = shot.name
+                rec["camera"] = FRAMING_CAMERA
+            path = EPISODE_CONFIG_ROOT / f"{stem}.json"
             path.write_text(json.dumps(rec, indent=2, ensure_ascii=False))
             logger.info(f"episode config: {path}")
             return path
@@ -3269,6 +3276,12 @@ class MainWindow(QMainWindow):
                 # a start key that is also a stop key is one slip from a discarded take.
                 if self.wait_for_start(cfg, robot):
                     break
+
+                # The staged scene, as it stood when the episode began. Taken here rather
+                # than pulled from the video later: reproducing a layout for an
+                # in-distribution evaluation means looking at a picture of it, and decoding
+                # frame 0 out of an episode to get one is work nobody does at the bench.
+                self._episode_start_frame = getattr(self, "last_main_frame", None)
 
                 # Read it AGAIN, now that the gate has closed. The gate points the object
                 # combobox at the staging row's prop, and it opens inside wait_for_start -- so
