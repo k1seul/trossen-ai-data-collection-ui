@@ -2936,6 +2936,8 @@ class MainWindow(QMainWindow):
                 arm.write("Torque_Enable", 1)                      # position mode
             starts = {n: np.asarray(a.read("Present_Position"), dtype=np.float32)
                       for n, a in robot.leader_arms.items()}
+            fstarts = {n: np.asarray(a.read("Present_Position"), dtype=np.float32)
+                       for n, a in robot.follower_arms.items()}
         except Exception:
             logger.exception("could not take the leader into position mode")
             return
@@ -2952,12 +2954,17 @@ class MainWindow(QMainWindow):
                     s = starts[n]
                     goal = s + (np.asarray(pose[:len(s)], dtype=np.float32) - s) * u
                     arm.write("Goal_Position", goal.astype(np.float32))
-                # Keep stepping teleoperation so the follower comes with it, rather than
-                # snapping across the whole gap once the loop resumes.
-                try:
-                    robot.teleop_step(record_data=False)
-                except Exception:
-                    pass
+                # The follower is walked along the same ramp rather than teleoperated onto it.
+                # teleop_step writes External_Efforts to the leader, which is in position mode
+                # for the length of this move and refuses them -- so it failed silently and the
+                # follower did not come, then crossed the whole gap the moment something else
+                # commanded it.
+                for n, arm in robot.follower_arms.items():
+                    s = fstarts.get(n)
+                    if s is None:
+                        continue
+                    goal = s + (np.asarray(pose[:len(s)], dtype=np.float32) - s) * u
+                    arm.write("Goal_Position", goal.astype(np.float32))
                 busy_wait(1 / fps)
         finally:
             if not hold:
@@ -3009,8 +3016,15 @@ class MainWindow(QMainWindow):
         # there is nothing to align to and nothing to set by hand -- and aligning to wherever
         # the leader was left is what used to drag the arm somewhere else before the scene was
         # even staged.
+        # Hold the FOLLOWER at the start pose directly, and leave the leader alone. Holding the
+        # leader in position mode instead had teleop_step writing External_Efforts to an arm
+        # that was no longer accepting them: the SDK refuses it, the loop caught the error once
+        # and then skipped silently every iteration after, and the camera froze with it. The
+        # follower is the arm whose pose the episode records, so holding it is also the direct
+        # answer rather than one mediated by the leader.
+        hold_pose = list(EPISODE_START_POSE)
         if robot is not None:
-            self.drive_to_start_pose(robot, fps, hold=True)
+            self.drive_to_start_pose(robot, fps, hold=False)
         keys, last_emit, warned = None, 0.0, False
         while not self.events["start_episode"]:
             step_t = time.perf_counter()
@@ -3026,10 +3040,16 @@ class MainWindow(QMainWindow):
                 return True
             if robot is not None and self.events.get("go_home"):
                 self.events["go_home"] = False
-                self.drive_to_start_pose(robot, fps)
+                self.drive_to_start_pose(robot, fps, hold=False)
             if robot is not None:
                 try:
-                    observation, _ = robot.teleop_step(record_data=True)
+                    # Re-commanded every step so it does not sag, and read rather than
+                    # teleoperated so nothing depends on where the leader is.
+                    for arm in robot.follower_arms.values():
+                        arm.write("Goal_Position",
+                                  np.asarray(hold_pose[:len(arm.motor_names)],
+                                             dtype=np.float32))
+                    observation = robot.capture_observation()
                     state = observation.get("observation.state")
                     if state is not None:
                         # For the gate's start-pose readout. Written from the worker and read
@@ -3049,13 +3069,17 @@ class MainWindow(QMainWindow):
                 except Exception:
                     if not warned:                        # once, not thirty times a second
                         warned = True
-                        logger.exception("teleoperation failed while waiting to start")
+                        logger.exception("holding the start pose failed")
+                        self.log_signal.emit(
+                            "Could not hold the start pose or read the cameras -- see the log. "
+                            "The feed will stay frozen until this is fixed.", False)
             busy_wait(max(0.0, 1 / fps - (time.perf_counter() - step_t)))
         self.events["start_episode"] = False
-        # The episode is about to be teleoperated, so the leader has to be the operator's
-        # again. It is already at the start pose, so nothing moves when it changes hands.
+        # The episode is about to be teleoperated, and the follower is at the start pose while
+        # the leader is wherever the operator left it -- so the first teleop step would close
+        # that gap in one move. Walk the leader onto the pose first, then hand it back.
         if robot is not None:
-            self.release_leader(robot)
+            self.drive_to_start_pose(robot, fps, hold=False)
             self.log_signal.emit(colored("leader released -- recording", "cyan"), False)
         return False
 
