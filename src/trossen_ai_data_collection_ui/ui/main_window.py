@@ -837,9 +837,6 @@ class MainWindow(QMainWindow):
                 init_data_collection_plan(DATA_COLLECTION_PLAN_CSV_PATH, self.tasks_config)
                 render_data_collection_plan_md(DATA_COLLECTION_PLAN_CSV_PATH, DATA_COLLECTION_PLAN_MD_PATH)
 
-                # Join this episode to the staging row it was recorded under, so the conditions
-                # behind it -- zones, lighting, distractors, start nudge -- stay recoverable.
-                self.log_staged_episode(episode_idx, episode_instruction)
                 self.populate_task_combobox()  # Refresh the task selection combobox.
                 dialog.accept()  # Close the dialog.
             except yaml.YAMLError as e:
@@ -1106,7 +1103,11 @@ class MainWindow(QMainWindow):
         (or ends the session if this was the last episode).
         """
         logger.info("Finish episode triggered by user")
-        self.advance_staging()
+        # NOT here. Space fires the instant the operator ends the take, on the UI thread, while
+        # the worker has yet to write the episode's row -- so the join was logged against the
+        # NEXT row and every episode's zones, lighting and start nudge belonged to a different
+        # one. The advance happens once the episode is actually logged, which is also what
+        # advance_staging says it is for: only a KEPT episode advances.
         self.set_logs("Finish episode triggered: saving episode and moving to the next one")
         self.events["finish_episode"] = True
         self.events["exit_early"] = True
@@ -1889,9 +1890,41 @@ class MainWindow(QMainWindow):
             logger.exception("could not read the staging sheet at %s", STAGING_SHEET)
             return
         if self.staging_rows:
+            self.staging_idx = self._staging_resume_point()
+            done = self.staging_idx
             self.set_logs(f"staging sheet: {len(self.staging_rows)} episodes from "
-                          f"{STAGING_SHEET}", clear=False)
+                          f"{STAGING_SHEET}"
+                          + (f"; {done} already recorded, resuming at row {done + 1}"
+                             if done else ""), clear=False)
             self.show_staging()
+
+    def _staging_resume_point(self) -> int:
+        """How many rows of this sheet are already in the can, from the episode configs.
+
+        Without this the index restarts at zero every time the sheet is loaded, and a second
+        session re-records rows that are already done -- silently, since the sheet itself has
+        no memory. The configs are the record of what was kept, one file per episode, and they
+        carry the task so another task's rows cannot be counted.
+        """
+        try:
+            rows = [json.loads(p.read_text())
+                    for p in EPISODE_CONFIG_ROOT.glob(f"{self.selected_task}_*.json")]
+        except Exception:
+            logger.exception("could not read the episode configs; starting at row 1")
+            return 0
+        done = [int(r["staging_row"]) for r in rows
+                if r.get("task") == self.selected_task and r.get("staging_row")]
+        if not done:
+            return 0
+        top = max(done)
+        if top > len(self.staging_rows):
+            # A regenerated sheet is a different sheet, and row numbers do not carry across it.
+            self.set_logs(
+                f"{len(done)} episodes were recorded against a longer sheet than this one; "
+                f"starting at row 1. Check for duplicates before trusting the counts.",
+                clear=False)
+            return 0
+        return top
 
     def _grab_main_camera_frame(self) -> "np.ndarray | None":
         """One RGB frame from the main camera, without a recording session running.
@@ -3372,7 +3405,9 @@ class MainWindow(QMainWindow):
 
                 # Join this episode to the staging row it was recorded under, so the conditions
                 # behind it -- zones, lighting, distractors, start nudge -- stay recoverable.
+                # Then, and only then, move on: a discarded take repeats its row.
                 self.log_staged_episode(episode_idx, episode_instruction)
+                self.advance_staging()
 
                 recorded_episodes += 1
                 batched_episodes += 1
