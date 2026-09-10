@@ -1,9 +1,11 @@
 # Collecting `pick_place_fruit_bowl` for an OOD generalization experiment
 
-The previous round could not measure generalization, because nothing was held out. Object
-position was randomized (good) and everything else was fixed, so a policy that memorised the
-route scored the same as one that looked. This round deliberately withholds three things, so
-"does it generalize" becomes a number rather than an impression.
+The previous round could not measure generalization, because it did not *cover* enough to split
+on. Object position was randomized (good) and everything else was fixed, so a policy that
+memorised the route scored the same as one that looked.
+
+This round records **everything, evenly**, and the OOD splits are drawn afterwards from the data
+itself. Nothing is withheld while recording.
 
 Read [what_the_trained_policy_showed.md](what_the_trained_policy_showed.md) first if you have
 not: it is the evidence for why each choice below is what it is.
@@ -24,69 +26,73 @@ band. Divide the mat across it into three zones of roughly equal width:
 
 Mark the two boundaries on the mat with tape. The operator only ever needs to know **L, C, R**.
 
-## What is held out, and why
+## Nothing is held out while recording
 
-### 1. Compositional — two of the six routes
+The split is made **later, on the recorded data**. Every attribute an OOD split needs is
+recoverable: the route from where the gripper closes and next opens, position from the joint
+angles, lighting from the frame brightness, the object from the task index.
+`real_robot/ood_split.py` in the training repo does this and writes the episode ids.
 
-The object and the container each go in a zone, and never in the same one, giving six routes.
-**Record four. Never record the two long crossings.**
+Withholding at collection time would cost episodes and, worse, tangle the axes: an evaluation
+set recorded in its own session carries that session's lighting and staging with it, so an
+"unseen route" result would also be an unseen-room result. One evenly covered recording, split
+afterwards, keeps them separable and lets the same data answer several questions.
 
-| route | object | container | |
-|---|---|---|---|
-| L → C | L | C | record |
-| C → L | C | L | record |
-| C → R | C | R | record |
-| R → C | R | C | record |
-| **L → R** | **L** | **R** | **HELD OUT — evaluation only** |
-| **R → L** | **R** | **L** | **HELD OUT — evaluation only** |
+What collection has to deliver instead is **coverage** and **decorrelation**.
 
-Every zone is demonstrated in both roles: the policy sees objects picked from L, C and R, and
-containers approached at L, C and R. Only the *pairing* is new at evaluation. A policy that has
-learned "find the object, then find the container" handles it; one that memorised routes does
-not. That is exactly the failure this dataset produced last time, when the container never moved
-and "banana" came to mean "carry right".
+### Coverage: every route, every condition, every object
 
-### 2. Appearance — one lighting condition
+The object and the container each go in a zone, never the same one, giving six routes. **Record
+all six**, evenly:
 
-Record under **two** conditions, alternating between episodes:
+```
+L->C   C->L   C->R   R->C   L->R   R->L
+```
 
-- **A**: overheads on (the previous round's condition)
+For contrast, the existing recording covers these very unevenly — `L->R` and `R->L` account for
+67 of 120 episodes because the bowl sat on one side, and **`R->C` never happened at all**. No
+split can hold out a route that was never recorded, which is what makes even coverage the job.
+
+Three lighting conditions, in equal share:
+
+- **A**: overheads on
 - **B**: overheads off, desk lamp on
+- **C**: blinds open, overheads off
 
-Hold **C: blinds open, overheads off** for evaluation only. The previous round held brightness
-constant to 0.7% across 120 episodes and the policy then failed outright in a dimmer room, so
-this axis is worth measuring rather than assuming.
+All four fruits.
 
-### 3. Semantic — one object (optional, recommended)
+### Decorrelation: the axes must not line up with each other
 
-Record **orange, apple, peach**. Hold out **banana** entirely.
+The staging sheet assigns lighting round-robin *within* each object-and-route group, so every
+route gets an equal share of every condition by construction. Leaving that to a shuffle produced
+a 0.46-level correlation between lighting and route on the first attempt — enough that holding
+out a route later would partly have been holding out a lighting condition. It also checks that
+the container's zone carries no hint about which fruit was named, which is the defect that broke
+the previous round.
 
-The instruction sentence is the only thing that identifies the object, so this asks whether the
-policy grounds a word it has seen in other contexts. It costs a quarter of the episodes. If the
-session runs short, drop this axis before dropping the other two — but note it in the dataset
-description, because a later reader cannot tell from the files.
-
----
+Both checks print with the sheet; both should read 0.00.
 
 ## Session plan
 
 ```bash
-python scripts/staging_plan.py --task pick_place_fruit_bowl --episodes 10 \
-    --split train --csv train_sheet.csv
-python scripts/staging_plan.py --task pick_place_fruit_bowl --episodes 4 \
-    --split eval  --csv eval_sheet.csv
+python scripts/staging_plan.py --task pick_place_fruit_bowl --episodes 6 --csv sheet.csv
 ```
 
-The sheet names a zone for the object and the container, the lighting condition and a start-pose
-nudge, for every episode. It refuses to emit a held-out route in the train split and emits
-**only** held-out routes in the eval split.
+4 objects x 6 routes x 6 episodes = **144 episodes**, a little more than the previous 120 and
+spread over every route instead of two. At ~16.5 s of motion plus the reset, budget about 35 s
+per episode: roughly 85 minutes of cycle time, so a half-day session with staging changes.
 
-**Volume**: 3 objects × 4 routes × 10 episodes = **120 training episodes**, matching the previous
-round. At ~16.5 s of motion plus the reset, budget about 35 s per episode: roughly 70 minutes of
-cycle time, so a half-day session with staging changes.
+Fewer episodes per cell is fine as long as every cell is filled — `--episodes 4` is 96 episodes
+and still covers everything. An empty cell is what cannot be fixed later.
 
-The evaluation set is recorded the same way but kept **separate** — a different repo id, e.g.
-`k1seul/pick_place_fruit_bowl_ood`. Do not mix it into training.
+Record it all into **one** repo id. The splits come afterwards:
+
+```bash
+python real_robot/ood_split.py --repo-id k1seul/pick_place_fruit_bowl_v2      # what it covers
+python real_robot/ood_split.py --repo-id ... --hold-out route:L->R,R->L --out route_split.json
+python real_robot/ood_split.py --repo-id ... --hold-out task:banana --out object_split.json
+python real_robot/ood_split.py --repo-id ... --hold-out "brightness:<112" --out light_split.json
+```
 
 ## Per-episode procedure
 
@@ -115,10 +121,9 @@ the choice to use it is not blocked by half the datasets lacking it.
 
 ## What to check before calling the session done
 
-- [ ] The container's zone is not correlated with which fruit is named — the staging sheet
-      prints this check; it is the defect that broke the last round
-- [ ] No episode in the training set uses route L→R or R→L
-- [ ] Both lighting conditions appear roughly equally, and condition C appears nowhere
+- [ ] `ood_split.py --repo-id <new>` lists **all six** routes, none missing
+- [ ] Both balance checks on the staging sheet read 0.00
+- [ ] Brightness spread across episodes is several units, not near 1 (one condition)
 - [ ] At least a few episodes contain a recovered grasp
 - [ ] Episodes end when the task ends: lengths should vary, not all be 18 s
-- [ ] The eval set is in its own repo id
+- [ ] Everything is in one repo id — the splits are made later, not by separate recordings
