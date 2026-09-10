@@ -300,8 +300,6 @@ class CalibrationMenu(QDialog):
         self.ui.pushButton_gotopose.clicked.connect(self.calib_gotopose)
 
     def closeEvent(self, event):
-        logger.info("window closed by the user -- a session log ending without this line "
-                    "stopped some other way")
         """
         Override the base class closeEvent with a graceful disconnect routine.
 
@@ -488,6 +486,14 @@ class MainWindow(QMainWindow):
 
         self.log_signal.connect(self.set_logs_slot)
         self.setup_gate_signal.connect(self.show_setup_gate)
+        # So a session log can be read afterwards. Every recent session ended at a different
+        # point with no traceback, which is what a closed window and a native crash look like
+        # alike -- and there was no way to tell which had happened.
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(
+                lambda: logger.info("application quit normally -- a session log that ends "
+                                    "without this line stopped some other way"))
         self.total_time_signal.connect(self.ui.label_total_time.setText)
 
         self.thread = None
