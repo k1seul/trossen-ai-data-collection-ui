@@ -78,3 +78,20 @@ DATA_COLLECTION_PLAN_CSV_PATH = DATA_COLLECTION_PLAN_ROOT / "data_collection_pla
 
 # Path to the human-readable markdown summary, regenerated from the CSV.
 DATA_COLLECTION_PLAN_MD_PATH = DATA_COLLECTION_PLAN_ROOT / "data_collection_plan.md"
+
+# The pose every episode starts from, which the staging sheet's start_nudge is measured
+# against. Same numbers as CalibrationMenu.safe_pose here and as HOME_POSE in the dreamer-vla
+# repo, where it was checked against the recordings: frame 0 of every episode sits within
+# 0.0002 rad of it.
+import math as _math
+
+EPISODE_START_POSE = [0.0, _math.pi / 3.0, _math.pi / 6.0, _math.pi / 5.0, 0.0, 0.0, 0.0]
+
+# Which joint each nudge in the sheet refers to. Read off the arm's kinematic order rather than
+# from a published table, so check it against the arm before trusting a small angle: joint 0
+# swings the whole arm, 1 raises it, 2 bends the elbow, 4 pitches the wrist.
+NUDGE_JOINTS = {"base": 0, "shoulder": 1, "elbow": 2, "forearm": 3, "wrist": 4, "roll": 5}
+
+# How close counts as "at the nudge". The sheet asks for 5 or 10 degrees, and the point is a
+# start pose that varies rather than one hit precisely, so this is generous on purpose.
+NUDGE_TOL_DEG = 1.5

@@ -78,9 +78,12 @@ from trossen_ai_data_collection_ui.utils.constants import (
     DATA_COLLECTION_PLAN_MD_PATH,
     PACKAGE_ROOT,
     EPISODE_CONFIG_ROOT,
+    EPISODE_START_POSE,
     FRAMING_CAMERA,
     FRAMING_REFERENCE,
     FRAMING_WORKSPACE,
+    NUDGE_JOINTS,
+    NUDGE_TOL_DEG,
     SESSION_LOG,
     STAGING_SHEET,
     TROSSEN_AI_CALIBRATION_CONFIG_PATH_PERSISTENT,
@@ -2441,6 +2444,50 @@ class MainWindow(QMainWindow):
         if row is not None:
             self._last_staged_row = row
 
+    @staticmethod
+    def parse_nudge(text: str):
+        """"shoulder +5deg" -> (joint index, degrees). None when there is nothing to hit."""
+        s = (text or "").strip().lower()
+        if not s or s == "none":
+            return None
+        joint = next((NUDGE_JOINTS[k] for k in NUDGE_JOINTS if s.startswith(k)), None)
+        m = re.search(r"([+-]?\d+(?:\.\d+)?)\s*deg", s)
+        if joint is None or m is None:
+            return None
+        return joint, float(m.group(1))
+
+    def nudge_report(self, row: dict) -> "tuple[bool, str]":
+        """How far each joint is from the start pose, against what the sheet asked for.
+
+        The sheet has been asking for "shoulder +5deg" with no way to tell when the arm is
+        there. It is not a pose anyone can eyeball to a degree, so it was being approximated or
+        skipped -- and a start-pose axis that is actually "wherever the arm happened to be" is
+        not the axis the sheet is balancing.
+        """
+        want = self.parse_nudge(row.get("start_nudge", ""))
+        state = getattr(self, "last_joint_state", None)
+        if state is None:
+            return False, "start pose: waiting for the arm"
+        deg = [math.degrees(float(state[i]) - EPISODE_START_POSE[i])
+               for i in range(min(len(state), len(EPISODE_START_POSE)) - 1)]   # skip the gripper
+        if want is None:
+            worst = max((abs(d) for d in deg), default=0.0)
+            ok = worst <= NUDGE_TOL_DEG
+            return ok, ("start pose: at home" if ok else
+                        f"start pose: should be home, but a joint is {worst:+.1f}deg off")
+        j, target = want
+        if j >= len(deg):
+            return False, f"start pose: no joint {j} on this arm"
+        here = deg[j]
+        name = next(k for k, v in NUDGE_JOINTS.items() if v == j)
+        others = [f"{k} {deg[v]:+.1f}" for k, v in sorted(NUDGE_JOINTS.items(), key=lambda kv: kv[1])
+                  if v != j and v < len(deg) and abs(deg[v]) > NUDGE_TOL_DEG]
+        ok = abs(here - target) <= NUDGE_TOL_DEG and not others
+        msg = f"start pose: {name} {here:+.1f}deg, asked for {target:+.1f}"
+        if others:
+            msg += f"  --  also off home: {', '.join(others)}"
+        return ok, msg
+
     def _refresh_setup_gate(self) -> None:
         """Live camera in the gate: the crop, and anything that has fallen outside it."""
         if self.framing is None:
@@ -2492,13 +2539,17 @@ class MainWindow(QMainWindow):
             self.gate_status.setText(msg)
             self.gate_status.setStyleSheet("")
             return
+        row = (self.staging_rows[self.staging_idx]
+               if self.staging_rows and self.staging_idx < len(self.staging_rows) else {})
+        pose_ok, pose_msg = self.nudge_report(row)
         ok, lines = framing_utils.verify_scene(expected, frame, crop,
                                                skip_top=self.framing.table_top)
         # From framing, not a copy: the copy is what drifted.
         icon = framing_utils.STATUS_LABELS
         body = "\n".join(f"{icon.get(s, s[:5].upper())}  {line}" for s, line in lines)
-        if ok:
-            self.gate_status.setText("Scene matches the staging row.\n" + body)
+        body = ("[OK] " if pose_ok else "[--] ") + pose_msg + "\n" + body
+        if ok and pose_ok:
+            self.gate_status.setText("Scene and start pose match the staging row.\n" + body)
             self.gate_status.setStyleSheet("color: #2e7d32; font-family: monospace;")
         else:
             self.gate_status.setText("Scene does NOT match the staging row:\n" + body)
@@ -2892,6 +2943,12 @@ class MainWindow(QMainWindow):
             if robot is not None:
                 try:
                     observation, _ = robot.teleop_step(record_data=True)
+                    state = observation.get("observation.state")
+                    if state is not None:
+                        # For the gate's start-pose readout. Written from the worker and read
+                        # from the UI thread, which is safe here because it is a whole object
+                        # replaced at once, never mutated in place.
+                        self.last_joint_state = state.numpy()
                     if keys is None:
                         keys = [k for k in observation if "image" in k]
                         self.worker.camera_labels_update.emit(keys[:4])
