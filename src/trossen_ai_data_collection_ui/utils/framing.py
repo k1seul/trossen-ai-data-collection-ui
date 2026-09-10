@@ -401,6 +401,20 @@ def find_containers(rgb: np.ndarray, crop: "tuple[int,int,int] | None",
     return list(best.values())
 
 
+# Every status verify_scene can return, with how to show it. It lives here, beside the code
+# that produces them, because the caller had its own copy and they drifted: "note" was added
+# for a container nobody asked for, the copy was not, and every gate after the first episode
+# died on a KeyError -- silently, since it happens inside a Qt slot.
+STATUS_LABELS = {
+    "ok": "OK   ",
+    "wrong": "WRONG",
+    "missing": "MISS ",
+    "extra": "EXTRA",
+    "skip": "eye  ",
+    "note": "note ",
+}
+
+
 def verify_scene(expected: list[dict], rgb: np.ndarray,
                  crop: "tuple[int, int, int] | None",
                  skip_top: int = 130) -> tuple[bool, list[tuple[str, str]]]:
@@ -527,6 +541,12 @@ def selftest() -> None:
         assert not ok and want in msg, f"({dx},{dy}) wanted '{want}', got '{msg}'"
     ok, msg = verdict(*rigid_shift(g, g))
     assert ok, msg
+
+    # Every status the code can emit has a label. Nothing else keeps them together, and the
+    # gap between them is invisible until a scene happens to produce the missing one.
+    import re as _re
+    emitted = set(_re.findall(r'lines\.append\(\("([a-z]+)"', Path(__file__).read_text()))
+    assert emitted <= set(STATUS_LABELS), f"no label for {sorted(emitted - set(STATUS_LABELS))}"
 
     scene = np.zeros((480, 640, 3), np.uint8)
     crop = (113, 0, 441)

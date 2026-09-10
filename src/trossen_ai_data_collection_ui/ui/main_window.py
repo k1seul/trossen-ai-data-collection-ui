@@ -2494,9 +2494,9 @@ class MainWindow(QMainWindow):
             return
         ok, lines = framing_utils.verify_scene(expected, frame, crop,
                                                skip_top=self.framing.table_top)
-        icon = {"ok": "OK   ", "wrong": "WRONG", "missing": "MISS ", "extra": "EXTRA",
-                "skip": "eye  "}
-        body = "\n".join(f"{icon[s]}  {line}" for s, line in lines)
+        # From framing, not a copy: the copy is what drifted.
+        icon = framing_utils.STATUS_LABELS
+        body = "\n".join(f"{icon.get(s, s[:5].upper())}  {line}" for s, line in lines)
         if ok:
             self.gate_status.setText("Scene matches the staging row.\n" + body)
             self.gate_status.setStyleSheet("color: #2e7d32; font-family: monospace;")
