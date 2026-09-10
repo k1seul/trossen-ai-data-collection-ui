@@ -2221,10 +2221,48 @@ class MainWindow(QMainWindow):
             head = QLabel(f"Episode {self.staging_idx + 1} of {len(self.staging_rows)}", dialog)
             head.setStyleSheet("font-size: 15px; font-weight: bold;")
             left.addWidget(head)
+            # The object lives here, not on the main window. This dialog is modal, so while
+            # it is open the combobox behind it cannot be reached -- and this is the moment the
+            # object is actually being decided, with the scene in front of you.
+            pick = QHBoxLayout()
+            pick.addWidget(QLabel("Object:", dialog))
+            self.gate_object = QComboBox(dialog)
+            self.gate_object.setEditable(self.ui.comboBox_episode_object.isEditable())
+            src = self.ui.comboBox_episode_object
+            self.gate_object.addItems([src.itemText(i) for i in range(src.count())])
+            self.gate_object.setCurrentText(src.currentText())
+            pick.addWidget(self.gate_object, 1)
+            left.addLayout(pick)
+
             said = QLabel(f"Recorded as:  \u201c{instruction}\u201d", dialog)
             said.setStyleSheet("color: #1565c0;")
             said.setWordWrap(True)
             left.addWidget(said)
+
+            def object_changed(text):
+                """Change it here and the episode is recorded with it -- nothing else to do."""
+                box = self.ui.comboBox_episode_object
+                box.blockSignals(True)
+                try:
+                    idx = box.findText(text)
+                    if idx >= 0:
+                        box.setCurrentIndex(idx)
+                    elif box.isEditable():
+                        box.setEditText(text)
+                finally:
+                    box.blockSignals(False)
+                self.update_instruction_preview()
+                said.setText(f"Recorded as:  \u201c{self.get_current_instruction()}\u201d")
+                if text != (row.get("variant") or "").strip():
+                    said.setStyleSheet("color: #ef6c00; font-weight: bold;")
+                    said.setToolTip("This is not the object the staging sheet asked for.")
+                else:
+                    said.setStyleSheet("color: #1565c0;")
+                    said.setToolTip("")
+
+            self.gate_object.currentTextChanged.connect(object_changed)
+            if self.gate_object.isEditable():
+                self.gate_object.editTextChanged.connect(object_changed)
             prev = getattr(self, "_last_staged_row", None)
             changed = [k for k, _, _ in self.SETUP_STEPS
                        if prev is not None and row.get(k) != prev.get(k)]
@@ -3301,9 +3339,35 @@ class MainWindow(QMainWindow):
             self.set_recording_ui_elements_enabled(True)
 
             if cfg.push_to_hub:  # Push the dataset to the Hugging Face Hub if requested.
-                logger.info(f"Pushing dataset to hub: {cfg.repo_id}")
-                dataset.push_to_hub(tags=cfg.tags, private=cfg.private)
-                logger.info("Dataset pushed to hub successfully")
+                # A session stopped before the first episode is finished leaves nothing on
+                # disk but a meta/ stub, and upload_folder on that raises "not a directory"
+                # from inside the worker -- which surfaces as the window closing the moment
+                # Start Recording is pressed, with the reason only in the log file.
+                root = Path(getattr(dataset, "root", "") or "")
+                episodes = int(getattr(dataset, "num_episodes", 0) or 0)
+                if episodes < 1:
+                    logger.info(f"nothing recorded; not pushing {cfg.repo_id}")
+                    self.log_signal.emit(
+                        "No episodes were recorded, so nothing was pushed to the Hub.", False)
+                elif not root.is_dir():
+                    logger.error(f"dataset root {root} is missing; not pushing {cfg.repo_id}")
+                    self.log_signal.emit(
+                        f"The dataset folder {root} is gone, so nothing was pushed. Delete "
+                        f"the Hub repo too if it was half-created, then record again.", False)
+                    error_occurred = True
+                else:
+                    logger.info(f"Pushing dataset to hub: {cfg.repo_id}")
+                    try:
+                        dataset.push_to_hub(tags=cfg.tags, private=cfg.private)
+                        logger.info("Dataset pushed to hub successfully")
+                    except Exception as e:
+                        # Episodes on disk are the expensive part and they are safe; a failed
+                        # upload is worth reporting in the window rather than ending the run.
+                        logger.exception("push to hub failed")
+                        self.log_signal.emit(
+                            f"Recorded {episodes} episode(s) locally, but the upload failed:"
+                            f"\n{e}\nThe data is at {root}.", False)
+                        error_occurred = True
 
         if not error_occurred:
             log_say("Done", cfg.play_sounds)
