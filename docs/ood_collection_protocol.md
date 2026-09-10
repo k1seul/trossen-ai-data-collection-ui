@@ -94,6 +94,44 @@ python real_robot/ood_split.py --repo-id ... --hold-out task:banana --out object
 python real_robot/ood_split.py --repo-id ... --hold-out "brightness:<112" --out light_split.json
 ```
 
+## The release: give it slack
+
+This is what the trained policy is failing on right now — it picks the fruit up, carries it, and
+never lets go. The reason is in the demonstrations:
+
+| distance from that episode's release pose | opens within 0.5 s |
+|---|---|
+| 0.00–0.02 rad | 62% |
+| 0.02–0.05 rad | 2% |
+| **beyond 0.05 rad** | **0% — never** |
+
+Every recorded release happens within about a degree of one exact pose, because the operator
+carried the fruit straight to a spot and opened the gripper the instant it arrived (speed at
+release is 6% of carry speed). There is no demonstration of releasing from slightly wide, or
+slightly high, or while still drifting.
+
+A policy lands where its own small errors put it, not where a human hand did. Arriving 0.05 rad
+off, it sees a state the data only ever labels "keep approaching" — so it approaches a pose it
+cannot quite reach, and hovers. The gripper is the one action with no second chance.
+
+**So make "over the container" a region rather than a point:**
+
+- Release from a **different spot over the container every episode** — near edge, far edge,
+  left, right, dead centre. The bowl is forgiving; the data has to say so.
+- Vary the **height**: from just above the rim, and from 10–15 cm up. Both work in reality.
+- **Do not line up carefully.** Open as soon as the fruit is over the opening, including while
+  the arm is still moving. Half the existing episodes already release in motion; keep that.
+- If it lands outside, **pick it up and place it again in the same episode**. That is both the
+  recovery data this dataset has none of, and a second release from a different pose.
+
+Check it afterwards:
+
+```bash
+python real_robot/ood_split.py --repo-id <new> --no-brightness   # prints the release basin
+```
+
+The 0.02–0.05 band should be well above 15%, not 2%.
+
 ## Per-episode procedure
 
 1. Read the next row of the sheet. Place the **object** and the **container** in the zones it
@@ -124,6 +162,7 @@ the choice to use it is not blocked by half the datasets lacking it.
 - [ ] `ood_split.py --repo-id <new>` lists **all six** routes, none missing
 - [ ] Both balance checks on the staging sheet read 0.00
 - [ ] Brightness spread across episodes is several units, not near 1 (one condition)
-- [ ] At least a few episodes contain a recovered grasp
+- [ ] The release basin report is "wide enough", not "NARROW"
+- [ ] At least a few episodes contain a recovered grasp, and some a second placement attempt
 - [ ] Episodes end when the task ends: lengths should vary, not all be 18 s
 - [ ] Everything is in one repo id — the splits are made later, not by separate recordings
