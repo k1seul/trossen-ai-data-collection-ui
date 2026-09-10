@@ -1325,8 +1325,8 @@ class MainWindow(QMainWindow):
                 # warning does not strobe.
                 self._framing_tick = getattr(self, "_framing_tick", 0) + 1
                 if self._framing_tick % 8 == 0:
-                    self.strays = framing_utils.outside_crop(image, self.framing.crop)
-                self.strays = [s for s in self.strays if s[2] >= self.framing.table_top]
+                    self.strays = framing_utils.outside_crop(
+                    image, self.framing.crop, skip_top=self.framing.table_top)
                 bgr_image = framing_utils.draw_outside(bgr_image, getattr(self, "strays", []))
             self.camera_widgets[index].set_image(bgr_image)  # Update the image in the widget.
 
@@ -1997,6 +1997,12 @@ class MainWindow(QMainWindow):
         has to be told what to put down, all of it, in one list. Resolving it here also gives
         the per-episode config something object-shaped to record instead of a joined string.
         """
+        def cell(zone_key: str, row_key: str) -> str:
+            """"L" plus a "far"/"near" column becomes "L-far"; without one it stays "L"."""
+            z = (row.get(zone_key) or "?").strip()
+            r = (row.get(row_key) or "").strip()
+            return f"{z}-{r}" if r and "-" not in z else z
+
         scene = []
         target = (row.get("variant") or "").strip()
         if target:
@@ -2008,8 +2014,8 @@ class MainWindow(QMainWindow):
             if " in the " in name:
                 name = name.rsplit(" in the ", 1)[0]
                 name = name.replace("Pick up the ", "").rsplit(" and place it", 1)[0].strip()
-            scene.append({"object": name or target, "zone": row.get("object_zone", "?"),
-                          "role": "target"})
+            scene.append({"object": name or target,
+                          "zone": cell("object_zone", "object_row"), "role": "target"})
         container = row.get("container_zone")
         if container:
             # Which container it is comes from the instruction, not from the row: on
@@ -2018,7 +2024,9 @@ class MainWindow(QMainWindow):
             named = "bowl"
             if " in the " in target:
                 named = target.rsplit(" in the ", 1)[1].strip(". ") or "bowl"
-            scene.append({"object": named, "zone": container, "role": "container"})
+            scene.append({"object": named,
+                          "zone": cell("container_zone", "container_row"),
+                          "role": "container"})
         other = (row.get("other_container") or "").strip()
         if other and other != "(none)":
             name, _, zone = other.partition("@")
@@ -2243,16 +2251,27 @@ class MainWindow(QMainWindow):
             self.gate_status.setText(f"Waiting for the first {FRAMING_CAMERA} frame...")
             return
         crop = self.framing.crop
-        strays = framing_utils.outside_crop(frame, crop)
+        strays = framing_utils.outside_crop(frame, crop, skip_top=self.framing.table_top)
         vis = framing_utils.draw_crop(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), crop)
         vis = framing_utils.draw_zones(vis, crop, self.framing.table_top)
         # Label what the checker believes it is looking at. When it disagrees with the
         # operator, the argument is settled by reading the labels rather than by trusting
         # either -- a tape roll read as a block would otherwise look like a missing object.
-        for p in framing_utils.identify_props(frame, crop):
+        #
+        # Same arguments as the check itself, which this had been drawn without: the wooden
+        # furniture passes the yellow gate that masking tape needs, and the gold pot is a ring
+        # of the same hue. Eighteen labels were being drawn where there were nine props and two
+        # containers, which reads as a broken detector rather than a missing argument.
+        top = self.framing.table_top
+        containers = framing_utils.find_containers(frame, crop, skip_top=top)
+        for p in (framing_utils.identify_props(frame, crop, skip_top=top,
+                                               exclude=containers) + containers):
             colour = (0, 200, 0) if p["inside_crop"] else (0, 0, 255)
             cv2.putText(vis, f"{p['object']} {p['zone']}",
-                        (int(p["x"]) - 40, int(p["y"]) - 16),
+                        (int(p["x"]) - 46, int(p["y"]) - 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 3)
+            cv2.putText(vis, f"{p['object']} {p['zone']}",
+                        (int(p["x"]) - 46, int(p["y"]) - 16),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, colour, 1)
         vis = np.ascontiguousarray(framing_utils.draw_outside(vis, strays))
         h, w = vis.shape[:2]
@@ -2264,7 +2283,8 @@ class MainWindow(QMainWindow):
         if not expected:
             msg = ("No staging row -- nothing to verify. Objects inside the crop: "
                    + (", ".join(sorted({p["object"] for p in
-                                        framing_utils.identify_props(frame, crop)
+                                        framing_utils.identify_props(
+                                            frame, crop, skip_top=top, exclude=containers)
                                         if p["inside_crop"]})) or "none"))
             self.gate_status.setText(msg)
             self.gate_status.setStyleSheet("")

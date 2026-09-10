@@ -179,7 +179,8 @@ PROP_HUES = {
 
 
 def outside_crop(
-    rgb: np.ndarray, crop: "tuple[int, int, int] | None", min_area: int = 220
+    rgb: np.ndarray, crop: "tuple[int, int, int] | None", min_area: int = 220,
+    skip_top: int = 0,
 ) -> list[tuple[str, int, int]]:
     """Coloured props whose centre falls outside the window the policy sees.
 
@@ -205,6 +206,8 @@ def outside_crop(
             if st[i, cv2.CC_STAT_AREA] < min_area:
                 continue
             cx, cy = int(ce[i][0]), int(ce[i][1])
+            if cy < skip_top:
+                continue                    # furniture above the table, never a stray prop
             if not (x <= cx <= x + side and y <= cy <= y + side):
                 out.append((name, cx, cy))
     return out
@@ -235,20 +238,29 @@ PROP_FILL_THRESHOLD = 0.65
 PROP_MIN_AREA = 220
 
 
-def zone_of(cx: float, crop: "tuple[int, int, int] | None", frame_w: int = 640) -> str:
-    """Which of L / C / R a point falls in, by thirds of the window the policy sees.
+def zone_of(cx: float, crop: "tuple[int, int, int] | None", frame_w: int = 640,
+            cy: "float | None" = None, top: int = 0) -> str:
+    """Which cell a point falls in: thirds across, and near / far up the table.
 
     Thirds of the crop rather than of the frame, and rather than the shoulder angles the
     staging sheet defines its zones by: what is being judged here is a picture, the operator is
     placing objects by eye against lines drawn on that same picture, and a zone that means one
     thing in the check and another on screen would be worse than no check.
+
+    Depth is split too, because three columns leave the near-far axis entirely to chance -- the
+    same axis the last round left fixed, and the one a reach has to generalise over. Returns
+    "L" when no cy is given, so a sheet written before rows existed still means something.
     """
     if crop:
-        x, _, side = crop
+        x, y, side = crop
     else:
-        x, side = 0, frame_w
-    t = (cx - x) / max(side, 1)
-    return "L" if t < 1 / 3 else ("C" if t < 2 / 3 else "R")
+        x, y, side = 0, 0, frame_w
+    u = (cx - x) / max(side, 1)
+    col = "L" if u < 1 / 3 else ("C" if u < 2 / 3 else "R")
+    if cy is None:
+        return col
+    y0, y1 = max(y, top), y + side
+    return f"{col}-{'far' if cy < (y0 + y1) / 2 else 'near'}"
 
 
 def identify_props(rgb: np.ndarray, crop: "tuple[int, int, int] | None",
@@ -288,7 +300,8 @@ def identify_props(rgb: np.ndarray, crop: "tuple[int, int, int] | None",
                 inside = x <= cx <= x + side and y <= cy <= y + side
             found.append({"colour": name, "kind": kind, "object": f"{name} {kind}",
                           "x": cx, "y": cy, "w": w, "h": h, "fill": round(fill, 2),
-                          "zone": zone_of(cx, crop), "inside_crop": inside})
+                          "zone": zone_of(cx, crop, cy=cy, top=skip_top),
+                          "inside_crop": inside})
     return found
 
 
@@ -377,8 +390,8 @@ def find_containers(rgb: np.ndarray, crop: "tuple[int,int,int] | None",
                 continue
             cx, cy = float(ce[i][0]), float(ce[i][1])
             out.append({"object": name, "kind": "container", "x": cx, "y": cy,
-                        "w": bw, "h": bh, "area": area, "zone": zone_of(cx, crop),
-                        "inside_crop": True})
+                        "w": bw, "h": bh, "area": area,
+                        "zone": zone_of(cx, crop, cy=cy, top=skip_top), "inside_crop": True})
     # One of each at most: the biggest blob wins, since a highlight on the mat can pass the
     # bowl's test but never beats the bowl itself.
     best = {}
@@ -416,8 +429,14 @@ def verify_scene(expected: list[dict], rgb: np.ndarray,
             def match(s, _c=colour, _k=kind):
                 return s.get("colour") == _c and s["kind"] == _k
 
-        hit = next((s for s in unmatched
-                    if match(s) and s["zone"] == want.get("zone")), None)
+        # A sheet written before rows existed asks for "L", not "L-far". Compare on what it
+        # actually specifies rather than failing every line of an older sheet.
+        wz = str(want.get("zone", ""))
+
+        def same_zone(s, _w=wz):
+            return s["zone"].split("-")[0] == _w if "-" not in _w else s["zone"] == _w
+
+        hit = next((s for s in unmatched if match(s) and same_zone(s)), None)
         if hit is not None:
             unmatched.remove(hit)
             lines.append(("ok", f"{want['object']} in {want['zone']}"))
@@ -470,20 +489,22 @@ def draw_zones(bgr: np.ndarray, crop: "tuple[int, int, int] | None",
     if y1 <= y0:
         return bgr
 
-    for k in (1, 2):
-        px = int(x + side * k / 3)
+    ymid = int((y0 + y1) / 2)
+    for px in (int(x + side / 3), int(x + side * 2 / 3)):
         cv2.line(bgr, (px, y0), (px, y1), (255, 255, 255), 2)
         cv2.line(bgr, (px, y0), (px, y1), (60, 60, 60), 1)
+    cv2.line(bgr, (max(0, x), ymid), (min(w, x + side), ymid), (255, 255, 255), 2)
+    cv2.line(bgr, (max(0, x), ymid), (min(w, x + side), ymid), (60, 60, 60), 1)
 
-    # Twice, top and bottom of the band: the arm stands in the middle of the frame and hides
-    # whichever one is behind it.
-    for k, label in enumerate("LCR"):
+    # One label per cell, at the cell's own centre, so a name always sits where the object goes.
+    for k, col in enumerate("LCR"):
         px = int(x + side * (k + 0.5) / 3)
-        for py in (y0 + 40, y1 - 18):
-            cv2.putText(bgr, label, (px - 16, py), cv2.FONT_HERSHEY_SIMPLEX, 1.2,
-                        (0, 0, 0), 5)
-            cv2.putText(bgr, label, (px - 16, py), cv2.FONT_HERSHEY_SIMPLEX, 1.2,
-                        (255, 255, 255), 2)
+        for row, py in (("far", (y0 + ymid) // 2), ("near", (ymid + y1) // 2)):
+            text = f"{col}-{row}"
+            (tw, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+            org = (px - tw // 2, py)
+            cv2.putText(bgr, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 5)
+            cv2.putText(bgr, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
     return bgr
 
 
@@ -522,18 +543,30 @@ def selftest() -> None:
     cv2.circle(props, (400, 300), 24, (220, 30, 30), -1)   # RGB, as identify_props reads it
     cv2.circle(props, (400, 300), 13, (0, 0, 0), -1)                          # red ring, C
     got = {(p["object"], p["zone"]) for p in identify_props(props, crop)}
-    assert ("green block", "L") in got, got
-    assert ("red tape roll", "C") in got, got
+    assert ("green block", "L-near") in got, got
+    assert ("red tape roll", "C-near") in got, got
 
+    # A sheet naming only a column still matches; one naming a cell is held to the cell.
     want = [{"object": "green block", "zone": "L"}, {"object": "red tape roll", "zone": "C"}]
-    good, lines = verify_scene(want, props, crop)
+    good, lines = verify_scene(want, props, crop, skip_top=0)
     assert good, lines
-    bad, lines = verify_scene([{"object": "green block", "zone": "R"},
-                               {"object": "red tape roll", "zone": "C"}], props, crop)
+    good, lines = verify_scene([{"object": "green block", "zone": "L-near"},
+                                {"object": "red tape roll", "zone": "C-near"}], props, crop, 0)
+    assert good, lines
+    bad, lines = verify_scene([{"object": "green block", "zone": "L-far"},
+                               {"object": "red tape roll", "zone": "C-near"}], props, crop, 0)
     assert not bad and any(s == "wrong" for s, _ in lines), lines
-    bad, lines = verify_scene([{"object": "blue block", "zone": "L"}], props, crop)
+    bad, lines = verify_scene([{"object": "green block", "zone": "R"},
+                               {"object": "red tape roll", "zone": "C"}], props, crop, 0)
+    assert not bad and any(s == "wrong" for s, _ in lines), lines
+    bad, lines = verify_scene([{"object": "blue block", "zone": "L"}], props, crop, 0)
     assert not bad and any(s == "missing" for s, _ in lines), lines
     assert any(s == "extra" for s, _ in lines), lines
+
+    # Furniture above the staging area is never a stray prop.
+    up = np.zeros((480, 640, 3), np.uint8)
+    cv2.rectangle(up, (20, 30), (60, 70), (220, 200, 30), -1)     # yellow, well above the table
+    assert outside_crop(up, crop) and not outside_crop(up, crop, skip_top=110)
     print("framing selftest ok")
 
 

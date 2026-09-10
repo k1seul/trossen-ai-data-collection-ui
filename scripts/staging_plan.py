@@ -31,6 +31,13 @@ import yaml
 
 ZONES = ["L", "C", "R"]          # left / centre / right, across the arm's reachable band
 
+# Depth, up and down the mat. Kept OUT of the route on purpose: making it part of the route
+# would turn six routes into thirty and multiply the session by five, for an axis that does not
+# need its own cell to vary. Drawn independently and balanced against the route instead, it
+# adds reach distance to the data at no cost in episodes -- and reach distance is exactly what
+# three columns of a single depth leave fixed.
+ROWS = ["far", "near"]
+
 # Every route gets recorded. Which ones become "unseen" is a decision made later, on the
 # recorded data -- the route an episode took is recoverable from where the gripper closes and
 # next opens, so nothing has to be withheld at collection time. Withholding here would only
@@ -130,7 +137,13 @@ def main() -> None:
                     free_c = [z for z in ZONES if z not in (con, obj)] or \
                              [z for z in ZONES if z != con]
                     other_con = f"{alt}@{rng.choice(free_c)}"
-                rows.append({"variant": v, "object_zone": obj, "container_zone": con,
+                # Alternate depth within each (object, route) group rather than sampling it,
+                # for the same reason lighting is stratified: a shuffle left lighting 0.46
+                # correlated with route, and depth drawn at random would land the same way.
+                obj_row = ROWS[k % len(ROWS)]
+                con_row = ROWS[(k + 1) % len(ROWS)]
+                rows.append({"variant": v, "object_zone": obj, "object_row": obj_row,
+                             "container_zone": con, "container_row": con_row,
                              "route": f"{obj}->{con}", "other_container": other_con,
                              "distractors": "; ".join(
                                  f"{short(o).split(' ->')[0]}@{z}" for o, z in zip(picked, dz))
@@ -138,8 +151,9 @@ def main() -> None:
                              "lighting": a.lighting[k % len(a.lighting)],
                              "start_nudge": rng.choice(NUDGES)})
     rng.shuffle(rows)                      # order of recording only; the design is already set
-    order = ["variant", "episode", "object_zone", "container_zone", "route",
-             "other_container", "distractors", "lighting", "start_nudge"]
+    order = ["variant", "episode", "object_zone", "object_row", "container_zone",
+             "container_row", "route", "other_container", "distractors", "lighting",
+             "start_nudge"]
     for i, r in enumerate(rows, 1):
         r["episode"] = i
     rows = [{k: r[k] for k in order} for r in rows]
@@ -150,12 +164,13 @@ def main() -> None:
           f"later, on the data)")
     print(f"zones: L / C / R across the mat, boundaries at -0.22 and +0.22 rad shoulder\n")
 
-    hdr = (f"{'target':<16} {'ep':>4} {'obj':>4} {'dest':>5} {'route':>7}  "
+    hdr = (f"{'target':<16} {'ep':>4} {'obj':>4} {'depth':>5} {'dest':>5} {'depth':>5} {'route':>7}  "
            f"{'other cont.':<11} {'also on the mat':<24} {'lighting':<28} start")
     print(hdr); print("-" * len(hdr))
     for r in rows[:16]:
         print(f"{short(r['variant']):<16} {r['episode']:>4} {r['object_zone']:>4} "
-              f"{r['container_zone']:>5} {r['route']:>7}  {r['other_container']:<11} "
+              f"{r['object_row']:>5} {r['container_zone']:>5} {r['container_row']:>5} "
+              f"{r['route']:>7}  {r['other_container']:<11} "
               f"{r['distractors']:<24} {r['lighting']:<28} {r['start_nudge']}")
     if len(rows) > 16:
         print(f"... {len(rows) - 16} more (use --csv for the whole sheet)")
@@ -165,6 +180,9 @@ def main() -> None:
     print()
     _report_balance(rows, "container_zone", "variant", ZONES,
                     "the container's zone must not hint at which object was named")
+    _report_balance(rows, "object_row", "route", ROWS,
+                    "depth must not line up with the route, or an unseen-route split would "
+                    "also be an unseen-distance split")
     _report_balance(rows, "lighting", "route", a.lighting,
                     "lighting must not line up with the route, or an unseen-route split would "
                     "also be an unseen-lighting split")
