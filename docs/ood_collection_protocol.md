@@ -176,15 +176,18 @@ python real_robot/ood_split.py --repo-id ... --hold-out "brightness:<112" --out 
 
 ## The round fruits are near the gripper's limit
 
-Measured from the demonstrations — the gripper opening while carrying is the object's width at
-the jaws, and the widest the jaws were ever commanded is 43 mm:
+Measured from the demonstrations. The gripper stalls where the object stops it, so the plateau
+in its position while carrying is the object's width at the jaws. That position is **one
+finger's travel, not the gap** — a block whose plateau reads 13.1 mm measures 25 mm with a
+ruler — so every figure below is twice the recorded value. The widest the jaws were ever
+commanded is 69.6 mm:
 
-| object | width held | of the 43 mm opening | clearance per side |
+| object | width held | of the 69.6 mm opening | clearance per side |
 |---|---|---|---|
-| apple | 36.4 mm | 85% | **3.3 mm** |
-| orange | 35.7 mm | 83% | **3.7 mm** |
-| peach | 34.0 mm | 79% | **4.5 mm** |
-| banana | 10.2 mm | 24% | 16.4 mm |
+| apple | 69.4 mm | 99.7% | **0.1 mm** |
+| orange | 68.1 mm | 98% | **0.7 mm** |
+| peach | 64.8 mm | 93% | **2.4 mm** |
+| banana | 19.2 mm | 28% | 25.2 mm |
 
 The policy's own joint errors on held-out frames are 0.024–0.030 rad on the two joints that
 carry the gripper laterally, which at a 30–40 cm reach is roughly **7–12 mm** at the jaws. That
@@ -200,15 +203,20 @@ episodes are clean first-try successes, so the policy has never seen the state i
 its time in.
 
 **Or use props that fit.** "Prop" here just means the object being picked up, and nothing needs
-buying — the wooden blocks already used by `pick_place_block_bowl` measure **13 mm**, leaving
-15 mm of clearance per side, comfortably more than the policy's error:
+buying — the wooden blocks already used by `pick_place_block_bowl` measure **25 mm** with a
+ruler, leaving 22 mm of clearance per side and a 25 mm vertical window, both comfortably more
+than the policy's error:
 
 | prop | width held | clearance per side | vs the policy's 7-12 mm error |
 |---|---|---|---|
-| apple / orange / peach | 34-36 mm | 3.3-4.5 mm | error is 2-3x the clearance |
-| **wooden block** | **13 mm** | **15 mm** | clearance is 1.5-2x the error |
-| banana | 10 mm | 16 mm | comfortable |
-| tape roll | 3 mm | 20 mm | comfortable |
+| apple / orange / peach | 65-69 mm | 0.1-2.4 mm | the jaws barely close around it at all |
+| **wooden block** | **25 mm** | **22 mm** | clearance is 2-3x the error |
+| banana | 19 mm | 25 mm | comfortable |
+| tape roll | 6 mm | 32 mm | comfortable |
+
+A round fruit at 69.4 mm against a 69.6 mm opening is not a tolerance the policy can miss — it
+is one the jaws cannot close around even when aimed perfectly. The blocks are the 20-30 mm prop
+this document asks for elsewhere; there is nothing to buy.
 
 If the point of this round is spatial and semantic generalization, a grasp needing millimetre
 precision becomes the dominant failure mode, and it affects `baseline`, `vision` and `special`
