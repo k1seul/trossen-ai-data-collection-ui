@@ -45,6 +45,25 @@ STAGING_SHEET = DATA_COLLECTION_PLAN_ROOT / "staging_sheet.csv"
 # That join is what lets a position or lighting OOD split be drawn later instead of re-shot.
 SESSION_LOG = DATA_COLLECTION_PLAN_ROOT / "session_log.csv"
 
+# The main camera's framing, produced by real_robot/mark_workspace.py in the dreamer-vla repo.
+# The policy does not see the whole 640x480 frame: a square window of it is cropped out before
+# the resize to 224, because the camera cannot be brought closer to the table and a 25 mm block
+# would otherwise cover a fraction of one patch. That window is fixed in camera pixels and baked
+# into the checkpoint, so a camera knocked between sessions, or an object staged outside the
+# window, silently produces episodes the policy cannot learn from.
+FRAMING_ROOT = Path.home() / ".trossen" / "trossen_ai_data_collection" / "framing"
+
+# The frame the crop was measured against. Compared to the live feed before recording starts.
+FRAMING_REFERENCE = FRAMING_ROOT / "reference.png"
+
+# The marks and the resulting crop, as mark_workspace.py wrote them.
+FRAMING_WORKSPACE = FRAMING_ROOT / "workspace.json"
+
+# Which camera the crop belongs to. The forecast loss reads this view's patch tokens and
+# no other, so it is the only feed the crop means anything on -- drawing it over the wrist
+# view would be worse than not drawing it.
+FRAMING_CAMERA = "cam_high"
+
 # Path to the data collection plan CSV (target vs. recorded episodes per task/object).
 # Auto-seeded from tasks.yaml and auto-updated as episodes are recorded; target_episodes
 # is left for the user to fill in and is never overwritten automatically.

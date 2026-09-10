@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 import cv2
+from trossen_ai_data_collection_ui.utils import framing as framing_utils
 from lerobot.common.datasets.image_writer import safe_stop_image_writer
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.policies.factory import make_policy
@@ -65,6 +66,9 @@ from trossen_ai_data_collection_ui.utils.constants import (
     DATA_COLLECTION_PLAN_CSV_PATH,
     DATA_COLLECTION_PLAN_MD_PATH,
     PACKAGE_ROOT,
+    FRAMING_CAMERA,
+    FRAMING_REFERENCE,
+    FRAMING_WORKSPACE,
     SESSION_LOG,
     STAGING_SHEET,
     TROSSEN_AI_CALIBRATION_CONFIG_PATH_PERSISTENT,
@@ -587,6 +591,24 @@ class MainWindow(QMainWindow):
         self.staging_idx = 0
         self._load_staging_sheet()
 
+        # The main camera's framing. Loaded once: without it the crop simply is not drawn and
+        # the check reports that it has nothing to compare against, rather than blocking a
+        # session over a missing file.
+        self.framing = framing_utils.Framing.load(FRAMING_REFERENCE, FRAMING_WORKSPACE)
+        # Resolved by name in update_camera_labels. Left unset until then: index 0 is not
+        # reliably the main view, and drawing the crop over the wrist feed would mislead the
+        # operator about where an object has to be staged.
+        self.framing_camera_index = None
+        self.last_main_frame = None
+        if self.framing is None:
+            logger.warning(
+                f"no camera framing reference at {FRAMING_REFERENCE}; the crop will not be "
+                f"drawn and the camera cannot be checked. Produce one with "
+                f"real_robot/mark_workspace.sh in the dreamer-vla repo."
+            )
+        else:
+            logger.info(f"camera framing: crop {self.framing.crop} from {FRAMING_REFERENCE}")
+
         self.episode_shortcuts = []
         for keys, slot in (
             (("Space", "S"), self.set_finish_episode),
@@ -596,6 +618,7 @@ class MainWindow(QMainWindow):
             (("Return", "Enter"), self.set_emergency),   # drop it and stop
             (("N",), self.show_staging),          # re-show the current staging row
             (("Ctrl+N",), self._load_staging_sheet),   # re-read the sheet from disk
+            (("C",), self.check_camera_framing),   # has the camera been knocked?
         ):
             for k in keys:
                 sc = QShortcut(QKeySequence(k), self)
@@ -1249,6 +1272,13 @@ class MainWindow(QMainWindow):
         if 0 <= index < len(self.camera_widgets):  # Ensure the index is within range.
             # Convert RGB to BGR for proper display (moved from control loop for better performance)
             bgr_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            if index == self.framing_camera_index and self.framing is not None:
+                # Keep the unmarked frame for the camera check, and show the operator the
+                # window the policy will actually see. An object staged outside it is invisible
+                # to the policy however clean the demonstration is, and an unmarked feed gives
+                # no way to notice.
+                self.last_main_frame = image
+                bgr_image = framing_utils.draw_crop(bgr_image, self.framing.crop)
             self.camera_widgets[index].set_image(bgr_image)  # Update the image in the widget.
 
     @Slot(list)
@@ -1276,6 +1306,14 @@ class MainWindow(QMainWindow):
                 # Key format: "observation.images.cam_high" -> "cam_high"
                 camera_name = key.split(".")[-1] if "." in key else key
                 label_widgets[i].setText(camera_name)
+                if camera_name == FRAMING_CAMERA:
+                    self.framing_camera_index = i
+        if self.framing is not None and self.framing_camera_index is None:
+            logger.warning(
+                f"'{FRAMING_CAMERA}' is not among the cameras "
+                f"{[k.split('.')[-1] for k in camera_keys[:4]]}; the crop belongs to that view "
+                f"only, so it will not be drawn and the camera will not be checked."
+            )
 
     def update_episode_count(self, change: int) -> None:
         """
@@ -1301,6 +1339,27 @@ class MainWindow(QMainWindow):
         :return: None
         """
         logger.info(f"Starting recording for task '{self.selected_task}'")
+
+        # A camera knocked since the crop was measured produces episodes that look perfect and
+        # teach the policy to look at the wrong part of the table, and nothing downstream
+        # reports it. Ask before spending a session on that, rather than after.
+        if not self.check_camera_framing(quiet=True):
+            ok, msg = framing_utils.check(self.framing, self.last_main_frame)
+            if (
+                QMessageBox.warning(
+                    self,
+                    "Camera has moved",
+                    f"{msg}\n\nThe crop is fixed in camera pixels and is baked into the "
+                    f"checkpoint, so episodes recorded now will train a policy that looks "
+                    f"somewhere else.\n\nRecord anyway?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                logger.info("recording cancelled: camera framing")
+                self.set_logs("Recording cancelled -- put the camera back first.", clear=False)
+                return
 
         # Perform hardware reset on all connected RealSense devices
         self.hardware_reset_cameras()
@@ -1748,6 +1807,38 @@ class MainWindow(QMainWindow):
             self.set_logs(f"staging sheet: {len(self.staging_rows)} episodes from "
                           f"{STAGING_SHEET}", clear=False)
             self.show_staging()
+
+    def check_camera_framing(self, quiet: bool = False) -> bool:
+        """Compare the live main camera against the frame the policy's crop was measured on.
+
+        Returns True when it is safe to record. A missing reference returns True as well: it
+        means nobody has measured a crop yet, which is a reason to say so, not to block a
+        session.
+        """
+        if self.framing is None:
+            msg = (
+                f"No camera framing reference at {FRAMING_REFERENCE}. Nothing to check "
+                f"against -- produce one with real_robot/mark_workspace.sh."
+            )
+            logger.warning(msg)
+            if not quiet:
+                self.set_logs(msg, clear=False)
+            return True
+
+        frame = self.last_main_frame
+        if frame is None:
+            msg = "No camera frame yet -- start a dry run or recording so the feed is live."
+            logger.warning(msg)
+            if not quiet:
+                self.set_logs(msg, clear=False)
+            return True
+
+        ok, msg = framing_utils.check(self.framing, frame)
+        logger.info(f"camera framing: {msg}")
+        self.set_logs(msg, clear=False)
+        if not ok and not quiet:
+            QMessageBox.warning(self, "Camera framing", msg)
+        return ok
 
     def show_staging(self) -> None:
         """Put the current staging row in the log, where the operator is already looking."""
