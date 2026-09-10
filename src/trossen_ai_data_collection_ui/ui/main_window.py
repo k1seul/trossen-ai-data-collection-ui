@@ -1191,25 +1191,55 @@ class MainWindow(QMainWindow):
         Clears the existing items in the combobox and adds task names from the loaded
         YAML configuration. Logs a message if no tasks are found.
         """
-        self.ui.comboBox_task_selection.clear()  # Clear existing items in the combobox.
+        # Keep whatever the operator had chosen. This runs again every time the task config is
+        # edited, and clear() moves the index to -1 while the first addItem moves it to 0, both
+        # of which reach on_dataset_selection -- so editing any task silently reselected the
+        # first one. Nothing says so, and the selection decides the HuggingFace repo the
+        # episodes are written to, so the cost of not noticing is a session recorded into the
+        # wrong dataset.
+        previous = self.selected_task or self.ui.comboBox_task_selection.currentText()
 
-        # Populate the combobox with task names from the configuration.
-        if (
-            self.tasks_config and "tasks" in self.tasks_config
-        ):  # Check if tasks exist in the configuration.
-            task_names = []
-            for task in self.tasks_config["tasks"]:  # Iterate over the tasks.
-                task_name = task.get("task_name")  # Get the task name.
-                if task_name:
-                    self.ui.comboBox_task_selection.addItem(
-                        task_name
-                    )  # Add task name to the combobox.
-                    task_names.append(task_name)
-            logger.info(f"Loaded {len(task_names)} tasks: {task_names}")
-        else:
+        box = self.ui.comboBox_task_selection
+        # Task names from the LAST populate, not the box's contents: the .ui file ships a
+        # placeholder item, so at startup "previous" is a name that was never a task, and
+        # warning about losing it would train the operator past the warning that matters.
+        had = getattr(self, "_task_names", set())
+        box.blockSignals(True)                   # repopulating is not the operator choosing
+        try:
+            box.clear()
+            if (
+                self.tasks_config and "tasks" in self.tasks_config
+            ):  # Check if tasks exist in the configuration.
+                task_names = []
+                for task in self.tasks_config["tasks"]:  # Iterate over the tasks.
+                    task_name = task.get("task_name")  # Get the task name.
+                    if task_name:
+                        box.addItem(task_name)  # Add task name to the combobox.
+                        task_names.append(task_name)
+                logger.info(f"Loaded {len(task_names)} tasks: {task_names}")
+                self._task_names = set(task_names)
+            else:
+                self.set_logs(
+                    "No tasks found in the configuration file."
+                )  # Log a message if no tasks are found.
+            if previous and box.findText(previous) >= 0:
+                box.setCurrentText(previous)
+        finally:
+            box.blockSignals(False)
+
+        # Signals were blocked, so bring selected_task back in step by hand -- and say so when
+        # the task that was selected is gone, rather than quietly recording into another one.
+        restored = box.currentText()
+        if previous in had and previous != restored:
             self.set_logs(
-                "No tasks found in the configuration file."
-            )  # Log a message if no tasks are found.
+                f"Task '{previous}' is no longer in the configuration; selected "
+                f"'{restored}' instead. Episodes would be recorded to that dataset.",
+                clear=False,
+            )
+            logger.warning(f"selected task '{previous}' vanished; now '{restored}'")
+        if restored != self.selected_task:
+            self.selected_task = restored
+            self.refresh_episode_object_choices()
 
     def get_task_parameters(self, task_name: str) -> dict | None:
         """
@@ -2081,6 +2111,36 @@ class MainWindow(QMainWindow):
             logger.exception("could not write the episode config")
             return None
 
+    def sync_instruction_to_staging(self, row: dict) -> str:
+        """Point the episode's instruction at the prop the staging row names. Returns it.
+
+        The instruction is built from the object combobox, which nobody was setting from the
+        sheet -- so a row asking for the green tape roll recorded "Pick up the red block",
+        whatever the previous episode happened to leave there. The scene and the sentence then
+        disagree, in a task whose entire point is that the sentence says which of eight objects
+        to pick, and the demonstration teaches the policy to ignore it.
+        """
+        want = (row.get("variant") or "").strip()
+        if not want:
+            return self.get_current_instruction()
+        box = self.ui.comboBox_episode_object
+        idx = box.findText(want)
+        box.blockSignals(True)
+        try:
+            if idx >= 0:
+                box.setCurrentIndex(idx)
+            elif box.isEditable():
+                box.setEditText(want)
+            else:
+                logger.warning(
+                    f"staging row names '{want}', which is not among this task's objects; "
+                    f"the sheet may have been generated for another task"
+                )
+        finally:
+            box.blockSignals(False)
+        self.update_instruction_preview()
+        return self.get_current_instruction()
+
     def show_setup_gate(self) -> None:
         """Ask whether the scene matches the staging row, and say what has to change.
 
@@ -2099,6 +2159,10 @@ class MainWindow(QMainWindow):
         # What the live check compares against. Empty means "nothing to verify", which is the
         # honest state without a sheet rather than a pass.
         self._gate_scene = self.scene_from_row(row) if row else []
+        # Before anything is drawn: the sentence has to name the prop the sheet is about to ask
+        # for, and the operator has to be able to read the one that will actually be recorded.
+        instruction = self.sync_instruction_to_staging(row) if row else \
+            self.get_current_instruction()
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Set up the scene")
@@ -2113,6 +2177,10 @@ class MainWindow(QMainWindow):
             head = QLabel(f"Episode {self.staging_idx + 1} of {len(self.staging_rows)}", dialog)
             head.setStyleSheet("font-size: 15px; font-weight: bold;")
             left.addWidget(head)
+            said = QLabel(f"Recorded as:  \u201c{instruction}\u201d", dialog)
+            said.setStyleSheet("color: #1565c0;")
+            said.setWordWrap(True)
+            left.addWidget(said)
             prev = getattr(self, "_last_staged_row", None)
             changed = [k for k, _, _ in self.SETUP_STEPS
                        if prev is not None and row.get(k) != prev.get(k)]
