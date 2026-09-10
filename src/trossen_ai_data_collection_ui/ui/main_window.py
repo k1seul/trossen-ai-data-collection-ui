@@ -2081,6 +2081,9 @@ class MainWindow(QMainWindow):
         row = None
         if self.staging_rows and self.staging_idx < len(self.staging_rows):
             row = self.staging_rows[self.staging_idx]
+        # What the live check compares against. Empty means "nothing to verify", which is the
+        # honest state without a sheet rather than a pass.
+        self._gate_scene = self.scene_from_row(row) if row else []
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Set up the scene")
@@ -2222,21 +2225,44 @@ class MainWindow(QMainWindow):
         if frame is None:
             self.gate_status.setText(f"Waiting for the first {FRAMING_CAMERA} frame...")
             return
-        strays = framing_utils.outside_crop(frame, self.framing.crop)
-        vis = framing_utils.draw_crop(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), self.framing.crop)
+        crop = self.framing.crop
+        strays = framing_utils.outside_crop(frame, crop)
+        vis = framing_utils.draw_crop(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), crop)
+        vis = framing_utils.draw_zones(vis, crop)
+        # Label what the checker believes it is looking at. When it disagrees with the
+        # operator, the argument is settled by reading the labels rather than by trusting
+        # either -- a tape roll read as a block would otherwise look like a missing object.
+        for p in framing_utils.identify_props(frame, crop):
+            colour = (0, 200, 0) if p["inside_crop"] else (0, 0, 255)
+            cv2.putText(vis, f"{p['object']} {p['zone']}",
+                        (int(p["x"]) - 40, int(p["y"]) - 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, colour, 1)
         vis = np.ascontiguousarray(framing_utils.draw_outside(vis, strays))
         h, w = vis.shape[:2]
         img = QImage(vis.data, w, h, 3 * w, QImage.Format_BGR888).copy()
         self.gate_preview.setPixmap(QPixmap.fromImage(img).scaled(
             640, 480, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        if strays:
-            names = ", ".join(sorted({n for n, _, _ in strays}))
-            self.gate_status.setText(f"OUTSIDE THE CROP: {names}. Move it inside the orange "
-                                     f"box, or the policy will never see it.")
-            self.gate_status.setStyleSheet("color: #c62828; font-weight: bold;")
+
+        expected = getattr(self, "_gate_scene", [])
+        if not expected:
+            msg = ("No staging row -- nothing to verify. Objects inside the crop: "
+                   + (", ".join(sorted({p["object"] for p in
+                                        framing_utils.identify_props(frame, crop)
+                                        if p["inside_crop"]})) or "none"))
+            self.gate_status.setText(msg)
+            self.gate_status.setStyleSheet("")
+            return
+        ok, lines = framing_utils.verify_scene(expected, frame, crop)
+        icon = {"ok": "OK   ", "wrong": "WRONG", "missing": "MISS ", "extra": "EXTRA",
+                "skip": "eye  "}
+        body = "\n".join(f"{icon[s]}  {line}" for s, line in lines)
+        if ok:
+            self.gate_status.setText("Scene matches the staging row.\n" + body)
+            self.gate_status.setStyleSheet("color: #2e7d32; font-family: monospace;")
         else:
-            self.gate_status.setText("Everything coloured is inside the crop.")
-            self.gate_status.setStyleSheet("color: #2e7d32;")
+            self.gate_status.setText("Scene does NOT match the staging row:\n" + body)
+            self.gate_status.setStyleSheet("color: #c62828; font-family: monospace; "
+                                           "font-weight: bold;")
 
     def show_staging(self) -> None:
         """Put the current staging row in the log, where the operator is already looking."""

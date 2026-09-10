@@ -210,6 +210,119 @@ def draw_outside(bgr: np.ndarray, strays: list[tuple[str, int, int]]) -> np.ndar
     return bgr
 
 
+# A tape roll is a ring and leaves its hole empty; a block fills its bounding box. Measured on
+# the props in use: blocks 0.79-0.96 filled, tape rolls 0.38-0.49. The gap is wide enough that
+# the threshold does not have to be careful, and it holds at any distance, which a size
+# threshold would not.
+PROP_FILL_THRESHOLD = 0.65
+
+# Below this the blob is noise or a sliver of something occluded, not a prop worth judging.
+PROP_MIN_AREA = 220
+
+
+def zone_of(cx: float, crop: "tuple[int, int, int] | None", frame_w: int = 640) -> str:
+    """Which of L / C / R a point falls in, by thirds of the window the policy sees.
+
+    Thirds of the crop rather than of the frame, and rather than the shoulder angles the
+    staging sheet defines its zones by: what is being judged here is a picture, the operator is
+    placing objects by eye against lines drawn on that same picture, and a zone that means one
+    thing in the check and another on screen would be worse than no check.
+    """
+    if crop:
+        x, _, side = crop
+    else:
+        x, side = 0, frame_w
+    t = (cx - x) / max(side, 1)
+    return "L" if t < 1 / 3 else ("C" if t < 2 / 3 else "R")
+
+
+def identify_props(rgb: np.ndarray, crop: "tuple[int, int, int] | None") -> list[dict]:
+    """Every block and tape roll in frame, with its colour, kind and zone."""
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    found = []
+    for name, ranges in PROP_HUES.items():
+        m = np.zeros(hsv.shape[:2], np.uint8)
+        for lo, hi in ranges:
+            m |= cv2.inRange(hsv, np.array(lo), np.array(hi))
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        n, _, st, ce = cv2.connectedComponentsWithStats(m, 8)
+        for i in range(1, n):
+            area = int(st[i, cv2.CC_STAT_AREA])
+            if area < PROP_MIN_AREA:
+                continue
+            w, h = int(st[i, cv2.CC_STAT_WIDTH]), int(st[i, cv2.CC_STAT_HEIGHT])
+            fill = area / max(w * h, 1)
+            cx, cy = float(ce[i][0]), float(ce[i][1])
+            kind = "block" if fill >= PROP_FILL_THRESHOLD else "tape roll"
+            inside = True
+            if crop:
+                x, y, side = crop
+                inside = x <= cx <= x + side and y <= cy <= y + side
+            found.append({"colour": name, "kind": kind, "object": f"{name} {kind}",
+                          "x": cx, "y": cy, "w": w, "h": h, "fill": round(fill, 2),
+                          "zone": zone_of(cx, crop), "inside_crop": inside})
+    return found
+
+
+def verify_scene(expected: list[dict], rgb: np.ndarray,
+                 crop: "tuple[int, int, int] | None") -> tuple[bool, list[tuple[str, str]]]:
+    """Compare the staged scene against what the camera can actually see.
+
+    Returns (everything matches, [(status, line)]). Containers are not judged: a white bowl on
+    a white mat is not something colour segmentation should be trusted to find, and a wrong
+    answer about it would cost more than no answer.
+    """
+    seen = identify_props(rgb, crop)
+    unmatched = list(seen)
+    lines, ok = [], True
+    for want in expected:
+        name = (want.get("object") or "").lower()
+        kind = "tape roll" if "tape" in name else ("block" if "block" in name else None)
+        colour = next((c for c in PROP_HUES if c in name), None)
+        if kind is None or colour is None:
+            lines.append(("skip", f"{want.get('object')} -- by eye "
+                                  f"(expected zone {want.get('zone')})"))
+            continue
+        hit = next((s for s in unmatched
+                    if s["colour"] == colour and s["kind"] == kind
+                    and s["zone"] == want.get("zone")), None)
+        if hit is not None:
+            unmatched.remove(hit)
+            lines.append(("ok", f"{want['object']} in {want['zone']}"))
+            continue
+        wrong = next((s for s in unmatched
+                      if s["colour"] == colour and s["kind"] == kind), None)
+        ok = False
+        if wrong is not None:
+            unmatched.remove(wrong)
+            where = wrong["zone"] if wrong["inside_crop"] else "OUTSIDE THE CROP"
+            lines.append(("wrong", f"{want['object']}: in {where}, "
+                                   f"should be {want['zone']}"))
+        else:
+            lines.append(("missing", f"{want['object']}: not found -- should be in "
+                                     f"{want['zone']}"))
+    for extra in unmatched:
+        ok = False
+        lines.append(("extra", f"{extra['object']} in {extra['zone']} is not in this episode"))
+    return ok, lines
+
+
+def draw_zones(bgr: np.ndarray, crop: "tuple[int, int, int] | None") -> np.ndarray:
+    """The L / C / R boundaries the check uses, so objects can be placed against them."""
+    if not crop:
+        return bgr
+    x, y, side = crop
+    h = bgr.shape[0]
+    for k in (1, 2):
+        px = int(x + side * k / 3)
+        cv2.line(bgr, (px, max(0, y)), (px, min(h, y + side)), (120, 120, 120), 1)
+    for k, label in enumerate("LCR"):
+        px = int(x + side * (k + 0.5) / 3)
+        cv2.putText(bgr, label, (px - 6, min(h - 8, y + side - 30)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (160, 160, 160), 2)
+    return bgr
+
+
 def selftest() -> None:
     """Shift a frame by a known amount and check the wording, not only the magnitude."""
     g = np.zeros((480, 640), np.uint8)
@@ -238,6 +351,25 @@ def selftest() -> None:
     strays = outside_crop(scene, crop)
     assert [s[0] for s in strays] == ["blue"], strays
     assert outside_crop(scene, None) == []
+
+    # A filled square reads as a block, a ring as a tape roll, and the zone follows the crop.
+    props = np.zeros((480, 640, 3), np.uint8)
+    cv2.rectangle(props, (170, 300), (198, 328), (30, 220, 30), -1)          # green block, L
+    cv2.circle(props, (400, 300), 24, (220, 30, 30), -1)   # RGB, as identify_props reads it
+    cv2.circle(props, (400, 300), 13, (0, 0, 0), -1)                          # red ring, C
+    got = {(p["object"], p["zone"]) for p in identify_props(props, crop)}
+    assert ("green block", "L") in got, got
+    assert ("red tape roll", "C") in got, got
+
+    want = [{"object": "green block", "zone": "L"}, {"object": "red tape roll", "zone": "C"}]
+    good, lines = verify_scene(want, props, crop)
+    assert good, lines
+    bad, lines = verify_scene([{"object": "green block", "zone": "R"},
+                               {"object": "red tape roll", "zone": "C"}], props, crop)
+    assert not bad and any(s == "wrong" for s, _ in lines), lines
+    bad, lines = verify_scene([{"object": "blue block", "zone": "L"}], props, crop)
+    assert not bad and any(s == "missing" for s, _ in lines), lines
+    assert any(s == "extra" for s, _ in lines), lines
     print("framing selftest ok")
 
 
