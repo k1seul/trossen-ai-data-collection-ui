@@ -2501,7 +2501,15 @@ class MainWindow(QMainWindow):
         stop = QPushButton("Stop recording", dialog)
         for b in (start, skip, stop):
             left.addWidget(b)
-        outer.addLayout(left, 0)
+        # A layout added with stretch 0 still grows to whatever its widest child asks for, and
+        # the scene check writes lines like "MOVE blue tape roll: 37 mm right, 14 mm further".
+        # Those were stretching the column and squeezing the preview off the side, which is the
+        # part of this dialog that has to stay big. Cap it and let the text wrap.
+        panel = QWidget(dialog)
+        panel.setLayout(left)
+        panel.setMaximumWidth(400)
+        panel.setMinimumWidth(320)
+        outer.addWidget(panel, 0)
 
         self.gate_preview = QLabel(dialog)
         # Not a minimum: a minimum plus the checklist can make the dialog wider than the
@@ -2668,8 +2676,12 @@ class MainWindow(QMainWindow):
         vis = np.ascontiguousarray(framing_utils.draw_outside(vis, strays))
         h, w = vis.shape[:2]
         img = QImage(vis.data, w, h, 3 * w, QImage.Format_BGR888).copy()
+        # To the space the label actually has, not a fixed 640x480: the panel is capped now,
+        # so whatever the dialog is given goes to the picture.
+        box = self.gate_preview.size()
         self.gate_preview.setPixmap(QPixmap.fromImage(img).scaled(
-            640, 480, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            max(box.width(), 320), max(box.height(), 240),
+            Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         expected = getattr(self, "_gate_scene", [])
         if not expected:
@@ -2708,11 +2720,12 @@ class MainWindow(QMainWindow):
                 + ("[OK] " if pose_ok else "[--] ") + pose_msg + "\n" + body)
         if ok and pose_ok:
             self.gate_status.setText("Scene and start pose match the staging row.\n" + body)
-            self.gate_status.setStyleSheet("color: #2e7d32; font-family: monospace;")
+            self.gate_status.setStyleSheet(
+                "color: #2e7d32; font-family: monospace; font-size: 11px;")
         else:
             self.gate_status.setText("Scene does NOT match the staging row:\n" + body)
             self.gate_status.setStyleSheet("color: #c62828; font-family: monospace; "
-                                           "font-weight: bold;")
+                                           "font-size: 11px; font-weight: bold;")
 
     def adopt_camera_framing(self, rgb) -> bool:
         """Re-derive the crop for where the camera is now, and start using it.
