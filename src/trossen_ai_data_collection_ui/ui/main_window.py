@@ -2548,6 +2548,62 @@ class MainWindow(QMainWindow):
         if teleoperate:
             self.update_speed_warning(0.0)  # Clear the warning once teleoperation stops.
 
+    # How fast the follower is allowed to close a gap to the leader when teleoperation starts.
+    # Slow on purpose: this runs unattended between episodes, and the whole point is that the
+    # motion be watchable rather than quick.
+    ALIGN_RATE_RAD_S = 0.5
+    ALIGN_MIN_S = 0.8
+    ALIGN_MAX_S = 6.0
+    ALIGN_TOL = 0.03            # radians; below this the arms are already together
+
+    def align_follower_to_leader(self, robot, fps: float = 30.0) -> float:
+        """Walk the follower onto the leader's pose before teleoperation begins. MOVES THE ARM.
+
+        teleop_step writes the leader's position straight to the follower, and this robot's
+        config sets max_relative_target to null, so lerobot's per-step cap is not in play. If
+        the leader is left somewhere far away -- which it is, every time the operator lets go
+        of it -- the first step of teleoperation closes the whole gap at once.
+
+        That was tolerable while teleoperation only began once recording did, with a hand on
+        the leader. It is not tolerable now that the arm goes live when the setup gate opens,
+        with the operator's hands on the props.
+
+        So the gap is closed deliberately instead: smoothstepped over a duration proportional
+        to its size, at a rate slow enough to watch and interrupt. Returns the gap it started
+        from, in the arms' own units.
+        """
+        try:
+            pairs = [(robot.leader_arms[n], robot.follower_arms[n])
+                     for n in robot.leader_arms if n in robot.follower_arms]
+        except Exception:
+            logger.exception("could not pair the leader and follower arms")
+            return 0.0
+        if not pairs:
+            return 0.0
+
+        starts, goals = [], []
+        for leader, follower in pairs:
+            goals.append(np.asarray(leader.read("Present_Position"), dtype=np.float32))
+            starts.append(np.asarray(follower.read("Present_Position"), dtype=np.float32))
+        gap = max((float(np.abs(g - s).max()) for g, s in zip(goals, starts)), default=0.0)
+        if gap <= self.ALIGN_TOL:
+            return gap
+
+        seconds = min(self.ALIGN_MAX_S, max(self.ALIGN_MIN_S, gap / self.ALIGN_RATE_RAD_S))
+        steps = max(2, int(seconds * fps))
+        self.log_signal.emit(
+            colored(f"aligning the arm to the leader: {gap:.2f} to close over {seconds:.1f}s "
+                    f"-- keep clear (Enter stops)", "yellow"), False)
+        for k in range(1, steps + 1):
+            if self.events.get("emergency") or self.events.get("stop_recording"):
+                break
+            u = k / steps
+            u = u * u * (3 - 2 * u)                  # smoothstep: no velocity step at either end
+            for (_, follower), s, g in zip(pairs, starts, goals):
+                follower.write("Goal_Position", (s + (g - s) * u).astype(np.float32))
+            busy_wait(1 / fps)
+        return gap
+
     def wait_for_start(self, cfg, robot=None) -> bool:
         """Block the recording thread until G (go), or a stop. Returns True if we should stop.
 
@@ -2574,14 +2630,19 @@ class MainWindow(QMainWindow):
         # moment this gate opens, which is earlier than it used to -- and if the leader was
         # left somewhere far from the follower, the first step closes that gap at once.
         self.log_signal.emit(
-            colored("TELEOPERATION LIVE -- the arm now follows the leader. Position the arm "
-                    "and the props, then press G to record (Enter = open the gripper and "
-                    "stop)", "cyan"), False)
+            colored("TELEOPERATION LIVE -- the arm follows the leader, after walking onto it "
+                    "first. Position the arm and the props, then press G to record "
+                    "(Enter = open the gripper and stop)", "cyan"), False)
         # Queued to the UI thread, which owns the widgets. The gate sets the same flag G does,
         # so this loop needs no other change and G keeps working with the dialog closed.
         self.setup_gate_signal.emit()
 
         fps = float(getattr(cfg, "fps", 30) or 30)
+        # Close any gap to the leader deliberately, before the first teleop step closes it all
+        # at once. Does nothing when the arms are already together, which is the usual case
+        # between episodes.
+        if robot is not None:
+            self.align_follower_to_leader(robot, fps)
         keys, last_emit, warned = None, 0.0, False
         while not self.events["start_episode"]:
             step_t = time.perf_counter()
