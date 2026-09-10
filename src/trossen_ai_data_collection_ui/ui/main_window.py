@@ -469,6 +469,7 @@ class MainWindow(QMainWindow):
 
     log_signal = Signal(str, bool)  # Signal for logging messages.
     setup_gate_signal = Signal()   # worker asks the UI thread to raise the setup gate
+    total_time_signal = Signal(str)  # worker asks the UI thread to set the clock label
 
     def __init__(self) -> None:
         """
@@ -481,6 +482,7 @@ class MainWindow(QMainWindow):
 
         self.log_signal.connect(self.set_logs_slot)
         self.setup_gate_signal.connect(self.show_setup_gate)
+        self.total_time_signal.connect(self.ui.label_total_time.setText)
 
         self.thread = None
 
@@ -2186,6 +2188,23 @@ class MainWindow(QMainWindow):
         return self.get_current_instruction()
 
     def show_setup_gate(self) -> None:
+        """Wrapper so a failure here cannot be silent.
+
+        This runs as a queued slot on the UI thread. An exception inside a Qt slot is printed
+        to stderr and swallowed -- the terminal gets a traceback, the log file gets nothing,
+        the worker sits in wait_for_start forever and the UI stays responsive. From the
+        outside that is exactly "the setup window does not appear", with no evidence anywhere
+        anyone thinks to look.
+        """
+        try:
+            self._show_setup_gate()
+        except Exception:
+            logger.exception("setup gate failed to open")
+            self.set_logs(
+                "The setup window could not be opened -- see the log for the reason. "
+                "Press G to start the episode without it.", clear=False)
+
+    def _show_setup_gate(self) -> None:
         """Ask whether the scene matches the staging row, and say what has to change.
 
         The sheet already randomises the container, the distractors and the lighting every
@@ -2851,6 +2870,7 @@ class MainWindow(QMainWindow):
                     "(Enter = open the gripper and stop)", "cyan"), False)
         # Queued to the UI thread, which owns the widgets. The gate sets the same flag G does,
         # so this loop needs no other change and G keeps working with the dialog closed.
+        logger.info("setup gate requested")
         self.setup_gate_signal.emit()
 
         fps = float(getattr(cfg, "fps", 30) or 30)
@@ -3147,7 +3167,9 @@ class MainWindow(QMainWindow):
                     False,
                 )
 
-                self.ui.label_total_time.setText(f"{float(cfg.episode_time_s)}s")
+                # Through a signal: this is the worker thread, and touching a widget from
+                # off the GUI thread is undefined in Qt.
+                self.total_time_signal.emit(f"{float(cfg.episode_time_s)}s")
 
                 # Wait until the operator says the scene and the start pose are ready. There is
                 # no warm-up phase in this loop -- recording begins the instant the episode
