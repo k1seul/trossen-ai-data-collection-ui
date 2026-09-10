@@ -52,7 +52,10 @@ baked into a harder task's data.
    stays stable. If you must adjust framing, treat it as a deliberate
    decision (extra visual diversity is fine in moderation, but don't do it
    mid-batch without noticing).
-2. Consistent, even lighting — avoid strong shadows or backlighting that
+2. **Vary the lighting deliberately between batches** — overheads on, overheads off with a
+   lamp, blinds open, different times of day. The previous round held brightness constant to
+   0.7% across 120 episodes, and the policy then failed outright in a dimmer room (-16 sigma
+   brightness, 5.3x sensor noise). Still avoid strong shadows or backlighting that
    changes through the day.
 3. Clear the mat of anything not part of the current task (except Tier 6,
    which intentionally wants everything out).
@@ -71,7 +74,14 @@ baked into a harder task's data.
 3. Check `data_collection_plan.md` for how many episodes are already
    recorded vs. the target for this variant.
 
-## Object placement — randomize every episode
+> **Amended after the first trained policy.** See
+> [what_the_trained_policy_showed.md](what_the_trained_policy_showed.md) for the measurements
+> behind the changes below. In short: randomizing the object was done and worked; not
+> randomizing the **container** taught the policy to carry each fruit to a fixed side, one
+> lighting condition made it fail in a dimmer room, and a fixed episode clock left a fifth of
+> every recording motionless.
+
+## Object AND container placement — randomize every episode
 
 This matters more than anything else for a policy that generalizes:
 
@@ -85,6 +95,16 @@ This matters more than anything else for a policy that generalizes:
 - Start the robot from the same neutral/home pose each episode (let the
   warmup phase settle into it) — vary the object, not the robot's starting
   configuration.
+
+### Use the staging sheet
+
+```bash
+python scripts/staging_plan.py --task pick_place_fruit_bowl --episodes 30 --csv plan.csv
+```
+
+It names a mat cell for the object **and** for the container each episode, rotates the lighting,
+and nudges the start pose. It also checks that the container's position has not ended up
+correlated with which object is named — the defect that produced "banana means carry right".
 
 ## Recording an episode
 
@@ -101,7 +121,15 @@ This matters more than anything else for a policy that generalizes:
    - Minor slip you want to immediately redo → **RE-RECORD LAST EPISODE**.
    - Want to abandon it and move to the next episode instead → **FAIL
      EPISODE NEXT**.
-5. Reposition the object during the automatic reset phase between episodes.
+5. Reposition the object **and the container** during the automatic reset phase, following
+   the staging sheet, and apply the start-pose nudge.
+6. **Press "Finish episode" as soon as the object is in the container.** Do not wait out the
+   clock: the previous round ran every episode to its full `episode_length_s`, and the last
+   20% of each one was the arm sitting motionless — a fifth of the training data.
+7. **If a grasp misses, recover within the episode and keep it.** "Fail episode" discards the
+   take, which is right for a spoiled episode and wrong for a miss the operator recovered
+   from. The previous dataset contains 120 clean takes and not one recovery, which is the one
+   thing a behaviour-cloning policy most needs to see.
 
 ## Periodic long reset (every 10 episodes)
 
