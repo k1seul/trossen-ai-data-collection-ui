@@ -13,7 +13,7 @@ from typing import (
     Union,
 )
 
-from PySide6.QtCore import Qt, QThread, Signal, Slot
+from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QAction,
     QImage,
@@ -464,6 +464,7 @@ class MainWindow(QMainWindow):
     """
 
     log_signal = Signal(str, bool)  # Signal for logging messages.
+    setup_gate_signal = Signal()   # worker asks the UI thread to raise the setup gate
 
     def __init__(self) -> None:
         """
@@ -475,6 +476,7 @@ class MainWindow(QMainWindow):
         self.ui.setupUi(self)  # Set up the UI layout and widgets.
 
         self.log_signal.connect(self.set_logs_slot)
+        self.setup_gate_signal.connect(self.show_setup_gate)
 
         self.thread = None
 
@@ -1308,6 +1310,14 @@ class MainWindow(QMainWindow):
                 # no way to notice.
                 self.last_main_frame = image
                 bgr_image = framing_utils.draw_crop(bgr_image, self.framing.crop)
+                # Blob detection every frame would cost more than it is worth at 30 fps, and a
+                # prop that leaves the crop stays out until somebody moves it, so a few times a
+                # second is as good as every frame. The result is held between checks so the
+                # warning does not strobe.
+                self._framing_tick = getattr(self, "_framing_tick", 0) + 1
+                if self._framing_tick % 8 == 0:
+                    self.strays = framing_utils.outside_crop(image, self.framing.crop)
+                bgr_image = framing_utils.draw_outside(bgr_image, getattr(self, "strays", []))
             self.camera_widgets[index].set_image(bgr_image)  # Update the image in the widget.
 
     @Slot(list)
@@ -1957,6 +1967,156 @@ class MainWindow(QMainWindow):
         layout.addWidget(close)
         dialog.exec()
 
+    # Fields of a staging row, in the order the scene gets built, with how to read each one.
+    SETUP_STEPS = [
+        ("variant", "Target", "the object the instruction names"),
+        ("object_zone", "Target zone", "L / C / R across the reachable band"),
+        ("container_zone", "Container zone", "where the bowl goes"),
+        ("other_container", "Other container", "the one the instruction does NOT name"),
+        ("distractors", "Also on the mat", "blocks and tape rolls, at their zones"),
+        ("lighting", "Lighting", "overheads, lamp or blinds"),
+        ("start_nudge", "Start pose", "nudge the arm off the home pose by this"),
+    ]
+
+    def show_setup_gate(self) -> None:
+        """Ask whether the scene matches the staging row, and say what has to change.
+
+        The sheet already randomises the container, the distractors and the lighting every
+        episode, which is the whole reason it exists -- and it is exactly that randomisation
+        that makes a row easy to half-apply. Moving the target and forgetting the lamp
+        correlates lighting with something it should be independent of, quietly, in a way that
+        only shows up when a split is drawn months later.
+
+        So the difference from the previous episode is what gets emphasised, not the row: the
+        fields that changed are the whole of the work, and the ones that did not are noise.
+        """
+        row = None
+        if self.staging_rows and self.staging_idx < len(self.staging_rows):
+            row = self.staging_rows[self.staging_idx]
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Set up the scene")
+        dialog.setModal(True)
+        outer = QHBoxLayout(dialog)
+
+        left = QVBoxLayout()
+        if row is None:
+            left.addWidget(QLabel("No staging sheet loaded -- stage the scene as you intend "
+                                  "and start when ready.", dialog))
+        else:
+            head = QLabel(f"Episode {self.staging_idx + 1} of {len(self.staging_rows)}", dialog)
+            head.setStyleSheet("font-size: 15px; font-weight: bold;")
+            left.addWidget(head)
+            prev = getattr(self, "_last_staged_row", None)
+            changed = [k for k, _, _ in self.SETUP_STEPS
+                       if prev is not None and row.get(k) != prev.get(k)]
+            if prev is None:
+                left.addWidget(QLabel("First episode -- set up every line below.", dialog))
+            elif changed:
+                labels = {k: lbl for k, lbl, _ in self.SETUP_STEPS}
+                banner = QLabel(f"CHANGE {len(changed)}: "
+                                + ", ".join(labels[c] for c in changed), dialog)
+                banner.setStyleSheet("color: #c62828; font-weight: bold;")
+                banner.setWordWrap(True)
+                left.addWidget(banner)
+            else:
+                same = QLabel("Nothing changes from the last episode.", dialog)
+                same.setStyleSheet("color: #2e7d32;")
+                left.addWidget(same)
+
+            grid = QFormLayout()
+            for key, label, hint in self.SETUP_STEPS:
+                value = row.get(key, "-") or "-"
+                w = QLabel(value, dialog)
+                w.setWordWrap(True)
+                w.setToolTip(hint)
+                if key in changed:
+                    w.setStyleSheet("color: #c62828; font-weight: bold;")
+                    label = f"CHANGE  {label}"
+                grid.addRow(QLabel(label, dialog), w)
+            left.addLayout(grid)
+
+        self.gate_status = QLabel("", dialog)
+        self.gate_status.setWordWrap(True)
+        left.addWidget(self.gate_status)
+        left.addStretch(1)
+
+        start = QPushButton("Setup done -- start recording  (G)", dialog)
+        start.setStyleSheet("font-weight: bold; padding: 8px;")
+        start.setDefault(True)
+        skip = QPushButton("Skip this staging row", dialog)
+        stop = QPushButton("Stop recording", dialog)
+        for b in (start, skip, stop):
+            left.addWidget(b)
+        outer.addLayout(left, 0)
+
+        self.gate_preview = QLabel(dialog)
+        self.gate_preview.setMinimumSize(640, 480)
+        outer.addWidget(self.gate_preview, 1)
+
+        # The camera keeps running while the gate is up, which is the point: the scene is being
+        # built right now, and a prop that ends up outside the crop has to be visible while
+        # there is still a chance to move it.
+        timer = QTimer(dialog)
+        timer.timeout.connect(self._refresh_setup_gate)
+        timer.start(200)
+
+        def go():
+            self.set_start_episode()
+            dialog.accept()
+
+        def do_skip():
+            self.advance_staging()
+            dialog.accept()
+            # Not emitted directly: accept() only asks exec() to return, so a direct re-entry
+            # would open the next gate inside the one still closing.
+            QTimer.singleShot(0, self.show_setup_gate)
+
+        def do_stop():
+            self.set_stop_recording()
+            dialog.accept()
+
+        start.clicked.connect(go)
+        skip.clicked.connect(do_skip)
+        stop.clicked.connect(do_stop)
+        # G still works, so the habit built during earlier sessions is not broken.
+        QShortcut(QKeySequence("G"), dialog).activated.connect(go)
+        self._gate_dialog = dialog
+        self._refresh_setup_gate()
+        dialog.exec()
+        timer.stop()
+        self._gate_dialog = None
+        if row is not None:
+            self._last_staged_row = row
+
+    def _refresh_setup_gate(self) -> None:
+        """Live camera in the gate: the crop, and anything that has fallen outside it."""
+        if self.framing is None:
+            self.gate_status.setText("No framing reference -- the crop cannot be shown.")
+            return
+        # Deliberately not _grab_main_camera_frame(): the gate only comes up between episodes
+        # of a running session, where the recorder holds the device. Opening it here would
+        # fight the recorder for it.
+        frame = self.last_main_frame
+        if frame is None:
+            self.gate_status.setText(f"Waiting for the first {FRAMING_CAMERA} frame...")
+            return
+        strays = framing_utils.outside_crop(frame, self.framing.crop)
+        vis = framing_utils.draw_crop(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), self.framing.crop)
+        vis = np.ascontiguousarray(framing_utils.draw_outside(vis, strays))
+        h, w = vis.shape[:2]
+        img = QImage(vis.data, w, h, 3 * w, QImage.Format_BGR888).copy()
+        self.gate_preview.setPixmap(QPixmap.fromImage(img).scaled(
+            640, 480, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        if strays:
+            names = ", ".join(sorted({n for n, _, _ in strays}))
+            self.gate_status.setText(f"OUTSIDE THE CROP: {names}. Move it inside the orange "
+                                     f"box, or the policy will never see it.")
+            self.gate_status.setStyleSheet("color: #c62828; font-weight: bold;")
+        else:
+            self.gate_status.setText("Everything coloured is inside the crop.")
+            self.gate_status.setStyleSheet("color: #2e7d32;")
+
     def show_staging(self) -> None:
         """Put the current staging row in the log, where the operator is already looking."""
         if not self.staging_rows:
@@ -2243,6 +2403,9 @@ class MainWindow(QMainWindow):
         self.log_signal.emit(
             colored("position the arm and the props, then press G to record "
                     "(Enter = emergency release)", "cyan"), False)
+        # Queued to the UI thread, which owns the widgets. The gate sets the same flag G does,
+        # so this loop needs no other change and G keeps working with the dialog closed.
+        self.setup_gate_signal.emit()
         while not self.events["start_episode"]:
             if self.events["stop_recording"] or self.events.get("emergency"):
                 return True
@@ -2254,6 +2417,12 @@ class MainWindow(QMainWindow):
         """G: the scene is staged and the arm is where it should start. Begin recording."""
         logger.info("Start episode triggered by user")
         self.events["start_episode"] = True
+        # The window-level G shortcut stays live alongside the gate's own, and recording
+        # starting behind a dialog still asking whether the scene is ready would be worse than
+        # either. Close it from here, so it does not matter which one fired.
+        dialog = getattr(self, "_gate_dialog", None)
+        if dialog is not None:
+            dialog.accept()
 
     def _emergency_release(self, robot) -> None:
         """Open the follower's gripper and hold it where it is. Called from the control loop."""

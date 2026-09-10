@@ -180,15 +180,26 @@ tasks:
   - task_name: "pick_specific_item_from_clutter"
     robot_model: "trossen_ai_solo"
     task_description: "Pick up the {object} and place it in the bowl. Do not touch the other items."
+    # Blocks AND tape rolls, and no fruit. Measured off the demonstrations, with the gripper
+    # position read as half the jaw gap: the jaws open 69.6 mm and an apple is 69.4, so a round
+    # fruit is not a tolerance the policy can miss -- the jaws cannot close around it even when
+    # aimed perfectly. A 25 mm block leaves 22 mm a side and a tape roll gripped across its
+    # outer diameter leaves 13, both comfortably past the policy's 7-12 mm of error.
+    #
+    # The two props also differ where it matters for this round. A block spans 27 px of the
+    # frame and covers about one 14 px patch inside the crop; a tape roll spans 46 px and
+    # covers nearly three, so it is the tape that gives the forecast loss something to see.
+    # Mixing them is what finally puts a real size and shape axis in the data, which 552
+    # episodes of effectively four object sizes did not have.
     task_objects:
       - "red block"
       - "blue block"
       - "green block"
       - "yellow block"
-      - "orange"
-      - "banana"
-      - "apple"
-      - "peach"
+      - "red tape roll"
+      - "blue tape roll"
+      - "green tape roll"
+      - "yellow tape roll"
     episode_length_s: 45
     warmup_time_s: 10
     reset_time_s: 25

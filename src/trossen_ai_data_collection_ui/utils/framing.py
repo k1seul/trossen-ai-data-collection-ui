@@ -153,6 +153,63 @@ def draw_crop(bgr: np.ndarray, crop: tuple[int, int, int] | None) -> np.ndarray:
     return out
 
 
+# The props, in OpenCV's 0-179 hue. Blocks and tape rolls share colours; what matters here is
+# only whether something coloured is outside the window, not which prop it is.
+PROP_HUES = {
+    "red": [((0, 110, 60), (10, 255, 255)), ((170, 110, 60), (179, 255, 255))],
+    "blue": [((95, 110, 50), (130, 255, 255))],
+    "green": [((45, 70, 40), (85, 255, 255))],
+    "yellow": [((20, 110, 90), (35, 255, 255))],
+}
+
+
+def outside_crop(
+    rgb: np.ndarray, crop: "tuple[int, int, int] | None", min_area: int = 220
+) -> list[tuple[str, int, int]]:
+    """Coloured props whose centre falls outside the window the policy sees.
+
+    An object that drifts out of the crop mid-episode -- knocked by the gripper, or staged just
+    past the edge -- makes that episode teach the policy about something it cannot see. From an
+    unmarked feed it looks like an ordinary take, so the take gets kept.
+
+    Centres rather than any overlap: a prop straddling the boundary is still mostly visible, and
+    flagging it every time the gripper nudges something would train the operator to ignore this.
+    """
+    if not crop:
+        return []
+    x, y, side = crop
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    out = []
+    for name, ranges in PROP_HUES.items():
+        m = np.zeros(hsv.shape[:2], np.uint8)
+        for lo, hi in ranges:
+            m |= cv2.inRange(hsv, np.array(lo), np.array(hi))
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        n, _, st, ce = cv2.connectedComponentsWithStats(m, 8)
+        for i in range(1, n):
+            if st[i, cv2.CC_STAT_AREA] < min_area:
+                continue
+            cx, cy = int(ce[i][0]), int(ce[i][1])
+            if not (x <= cx <= x + side and y <= cy <= y + side):
+                out.append((name, cx, cy))
+    return out
+
+
+def draw_outside(bgr: np.ndarray, strays: list[tuple[str, int, int]]) -> np.ndarray:
+    """Ring what fell outside, and say so where it cannot be missed mid-episode."""
+    if not strays:
+        return bgr
+    for _, cx, cy in strays:
+        cv2.circle(bgr, (cx, cy), 18, (0, 0, 255), 3)
+        cv2.drawMarker(bgr, (cx, cy), (0, 0, 255), cv2.MARKER_TILTED_CROSS, 26, 2)
+    names = ", ".join(sorted({n for n, _, _ in strays}))
+    h, w = bgr.shape[:2]
+    cv2.rectangle(bgr, (0, 0), (w, 30), (0, 0, 200), -1)
+    cv2.putText(bgr, f"OUTSIDE THE CROP: {names}  -- the policy cannot see it", (8, 21),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+    return bgr
+
+
 def selftest() -> None:
     """Shift a frame by a known amount and check the wording, not only the magnitude."""
     g = np.zeros((480, 640), np.uint8)
@@ -172,6 +229,15 @@ def selftest() -> None:
         assert not ok and want in msg, f"({dx},{dy}) wanted '{want}', got '{msg}'"
     ok, msg = verdict(*rigid_shift(g, g))
     assert ok, msg
+
+    scene = np.zeros((480, 640, 3), np.uint8)
+    crop = (113, 0, 441)
+    cv2.rectangle(scene, (300, 200), (330, 230), (220, 30, 30), -1)     # inside
+    assert outside_crop(scene, crop) == [], outside_crop(scene, crop)
+    cv2.rectangle(scene, (600, 300), (630, 330), (30, 30, 220), -1)     # outside, to the right
+    strays = outside_crop(scene, crop)
+    assert [s[0] for s in strays] == ["blue"], strays
+    assert outside_crop(scene, None) == []
     print("framing selftest ok")
 
 
