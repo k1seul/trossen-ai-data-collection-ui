@@ -22,27 +22,31 @@ tasks:
   # so every episode ran the clock out and the last fifth of each was the arm sitting still --
   # 14.7% of all recorded frames.
 
+# SIX objects, and the two left out are the point rather than the leftovers.
+#
+# Every colour and every kind below appears in training -- yellow as a tape roll, green as a
+# block -- so the held-out pair is not two objects the policy has never seen. It is two
+# COMBINATIONS it has never seen, made of parts it knows well. "Pick up the yellow block" asks
+# it to put together a colour it has read and a shape it has grasped, a sharper question than
+# whether it copes with an unfamiliar object, and one this bench asks for nothing.
+#
+# Keep the held-out two OFF THE MAT while recording. As distractors they would be seen but
+# never named, which measures something else and blurs the claim.
+
 - task_name: pick_specific_item_from_clutter
   robot_model: trossen_ai_solo
   task_description: Pick up the {object} and place it in the bowl. Do not touch the other items.
-  task_objects:
+  task_objects: &id001
   - red block
   - blue block
   - green block
-  - yellow block
   - red tape roll
   - blue tape roll
-  - green tape roll
   - yellow tape roll
-  props:
-  - red block
-  - blue block
-  - green block
+  props: *id001
+  held_out_objects:
   - yellow block
-  - red tape roll
-  - blue tape roll
   - green tape roll
-  - yellow tape roll
   episode_length_s: 45
   warmup_time_s: 10
   reset_time_s: 25

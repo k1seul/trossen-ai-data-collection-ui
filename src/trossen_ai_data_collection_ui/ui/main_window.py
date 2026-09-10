@@ -1913,19 +1913,28 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.exception("could not read the episode configs; starting at row 1")
             return 0
-        done = [int(r["staging_row"]) for r in rows
-                if r.get("task") == self.selected_task and r.get("staging_row")]
-        if not done:
+        # Row numbers only mean anything within one sheet, so count only episodes recorded
+        # against THIS one. Comparing lengths was not enough: a regenerated sheet of the same
+        # length would have been resumed into, and row 8 of a different plan is a different
+        # scene recorded as though it were progress.
+        sheet_id = (self.staging_rows[0].get("sheet_id") or "") if self.staging_rows else ""
+        mine = [int(r["staging_row"]) for r in rows
+                if r.get("task") == self.selected_task and r.get("staging_row")
+                and (r.get("staging_raw") or {}).get("sheet_id", "") == sheet_id]
+        others = len(rows) - len(mine)
+        if not sheet_id:
+            self.set_logs("This staging sheet has no id -- regenerate it so sessions can be "
+                          "resumed. Starting at row 1.", clear=False)
             return 0
-        top = max(done)
-        if top > len(self.staging_rows):
-            # A regenerated sheet is a different sheet, and row numbers do not carry across it.
+        if others:
             self.set_logs(
-                f"{len(done)} episodes were recorded against a longer sheet than this one; "
-                f"starting at row 1. Check for duplicates before trusting the counts.",
+                f"{others} episode(s) of this task were recorded against a different staging "
+                f"sheet. They stay in the dataset; this sheet starts from where IT left off.",
                 clear=False)
+        if not mine:
             return 0
-        return top
+        top = max(mine)
+        return min(top, len(self.staging_rows))
 
     def _grab_main_camera_frame(self) -> "np.ndarray | None":
         """One RGB frame from the main camera, without a recording session running.

@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import json
 import random
 from pathlib import Path
 
@@ -151,8 +153,18 @@ def main() -> None:
     # lighting and route, which would have made an unseen-route split partly an
     # unseen-lighting split -- the exact entanglement this sheet exists to prevent.
     rows = []
-    for v in variants:
-        for obj, con in rs:
+    # Counts groups so each starts the two-level axes on a different phase. Round-robin from
+    # zero every time is only balanced when the group size is a multiple of the number of
+    # levels: at three episodes per group it gave lighting 2:1 and depth 2:1, quietly, in a
+    # sheet whose whole purpose is that those are even.
+    for vi, v in enumerate(variants):
+        for ri, (obj, con) in enumerate(rs):
+            # Phase from BOTH indices. A plain group counter advances once per (object, route)
+            # pair, so its period is the number of routes -- every group of a given route then
+            # shares a phase, and with three episodes per group that route got two thirds of
+            # one lighting condition while the sheet's totals looked perfectly even. Summing
+            # the two indices makes the phase alternate along both.
+            g = vi + ri
             for k in range(a.episodes):
                 # Exclude the target by the PHYSICAL PROP, not the sentence: with the
                 # container named in the instruction, "red block -> bowl" and "red block ->
@@ -166,8 +178,8 @@ def main() -> None:
                 # Alternate depth within each (object, route) group rather than sampling it,
                 # for the same reason lighting is stratified: a shuffle left lighting 0.46
                 # correlated with route, and depth drawn at random would land the same way.
-                obj_row = ROWS[k % len(ROWS)]
-                con_row = ROWS[(k + 1) % len(ROWS)]
+                obj_row = ROWS[(k + g) % len(ROWS)]
+                con_row = ROWS[(k + g + 1) % len(ROWS)]
 
                 # Cells, not columns. A distractor in the target's column but at the other
                 # depth is a different place, and naming only the column leaves the depth to
@@ -195,12 +207,25 @@ def main() -> None:
                              "route": f"{obj}->{con}", "other_container": other_con,
                              "distractors": "; ".join(
                                  f"{o}@{z}" for o, z in zip(picked, dz)) or "(none)",
-                             "lighting": a.lighting[k % len(a.lighting)],
+                             "lighting": a.lighting[(k + g) % len(a.lighting)],
                              "start_nudge": rng.choice(NUDGES)})
     rng.shuffle(rows)                      # order of recording only; the design is already set
     order = ["variant", "episode", "object_zone", "object_row", "container_zone",
              "container_row", "route", "other_container", "distractors", "lighting",
              "start_nudge"]
+
+    # A fingerprint of the plan, carried on every row and copied into each episode's config.
+    # Row numbers only mean something within one sheet: regenerate it and row 8 is a different
+    # scene, so a session that resumed "at row 8" would silently record the wrong thing and
+    # count it as progress. With this, a sheet that is not the one an episode was recorded
+    # against is recognisable rather than assumed.
+    sheet_id = hashlib.sha1(
+        json.dumps([[r.get(k) for k in order if k != "episode"] for r in rows],
+                   sort_keys=True).encode()
+    ).hexdigest()[:12]
+    for r in rows:
+        r["sheet_id"] = sheet_id
+    order = order + ["sheet_id"]
     for i, r in enumerate(rows, 1):
         r["episode"] = i
     rows = [{k: r[k] for k in order} for r in rows]
@@ -248,9 +273,11 @@ def _report_balance(rows, field, against, levels, why):
         groups.setdefault(key, []).append(levels.index(r[field]))
     means = {k: sum(v) / len(v) for k, v in groups.items()}
     spread = (max(means.values()) - min(means.values())) if len(means) > 1 else 0.0
-    ok = spread < 0.35
+    # A two-level axis at spread 0.33 is a 2:1 split inside some group, which is exactly the
+    # entanglement these checks exist to catch -- and 0.35 waved it through.
+    ok = spread < 0.15
     print(f"{field} vs {against}: spread {spread:.2f} of {len(levels)} levels  "
-          f"{'OK' if ok else 'TOO HIGH -- try another --seed'}")
+          f"{'OK' if ok else 'TOO HIGH -- the sheet is entangled, not just unlucky'}")
     print(f"   ({why})")
 
 
