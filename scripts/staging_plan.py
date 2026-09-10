@@ -38,6 +38,25 @@ ZONES = ["L", "C", "R"]          # left / centre / right, across the arm's reach
 # three columns of a single depth leave fixed.
 ROWS = ["far", "near"]
 
+CELLS = [f"{z}-{r}" for z in ZONES for r in ROWS]
+
+# The props physically on the bench. Distractors are drawn from HERE and not from the task's
+# sentence variants, because splitting a sentence yields a bare colour: a task whose variants
+# name a container turned "Pick up the red block and place it in the pot." into "red", and the
+# sheet then asked for "red@R", which is not a thing anyone can put on a mat. It was read as
+# "any red object" and an apple went down -- a prop the jaws cannot close around and the scene
+# check has never heard of.
+PROPS = [f"{c} {k}" for k in ("block", "tape roll")
+         for c in ("red", "blue", "green", "yellow")]
+
+
+def target_object(v: str) -> str:
+    """The physical prop a variant names, whether it is a bare name or a whole instruction."""
+    if " in the " not in v:
+        return v.strip()
+    head = v.rsplit(" in the ", 1)[0]
+    return head.replace("Pick up the ", "").rsplit(" and place it", 1)[0].strip()
+
 # Every route gets recorded. Which ones become "unseen" is a decision made later, on the
 # recorded data -- the route an episode took is recoverable from where the gripper closes and
 # next opens, so nothing has to be withheld at collection time. Withholding here would only
@@ -58,9 +77,10 @@ def short(v: str) -> str:
     """
     if " in the " not in v:
         return v
-    head, tail = v.rsplit(" in the ", 1)
-    colour = head.replace("Pick up the ", "").split(" block")[0].strip()
-    return f"{colour} -> {tail.strip('. ')}"
+    tail = v.rsplit(" in the ", 1)[1]
+    # The whole prop, not its colour: "green" is not something anyone can put on a mat, and a
+    # sheet that said so got an apple instead of a green block.
+    return f"{target_object(v)} -> {tail.strip('. ')}"
 
 
 def routes() -> list[tuple[str, str]]:
@@ -89,12 +109,23 @@ def main() -> None:
                         "present the instruction carries no information -- there is only one "
                         "thing to pick -- so the policy never has to read it, and holding out "
                         "a colour later would measure nothing. 0 reproduces the old scenes.")
+    p.add_argument("--props", nargs="+", default=PROPS,
+                   help="the props physically on the bench, which distractors are drawn from. "
+                        "Defaults to four blocks and four tape rolls; pass the real list if "
+                        "the bench differs, since a sheet asking for a prop nobody has gets "
+                        "improvised.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--csv", type=Path, default=None)
     a = p.parse_args()
 
     task = load_task(a.config, a.task)
     variants = task["task_objects"]
+    props = list(a.props)
+    missing = sorted({target_object(v) for v in variants} - set(props))
+    if missing:
+        raise SystemExit(f"{a.task} names props that are not on the bench: {missing}\n"
+                         f"  bench: {props}\n"
+                         f"  Either put them out or pass --props with what is actually there.")
     rng = random.Random(a.seed)
     rs = routes()
 
@@ -107,25 +138,30 @@ def main() -> None:
     for v in variants:
         for obj, con in rs:
             for k in range(a.episodes):
-                # Exclude by the COLOUR, not the whole sentence: with the container named in
-                # the instruction, "red -> bowl" and "red -> pot" are different variants but
-                # the same physical block, so comparing sentences would put the target on the
-                # mat twice and make the instruction ambiguous.
-                me = short(v).split(" ->")[0]
-                others = [o for o in variants if short(o).split(" ->")[0] != me]
-                seen, uniq = set(), []
-                for o in others:                       # one block per colour, not per sentence
-                    c = short(o).split(" ->")[0]
-                    if c not in seen:
-                        seen.add(c); uniq.append(o)
-                others = uniq
+                # Exclude the target by the PHYSICAL PROP, not the sentence: with the
+                # container named in the instruction, "red block -> bowl" and "red block ->
+                # pot" are different variants and the same block, so comparing sentences would
+                # put the target on the mat twice and make the instruction ambiguous.
+                me = target_object(v)
+                others = [p for p in props if p != me]
                 rng.shuffle(others)
                 picked = others[: a.distractors]
-                # The distractors occupy zones too, so which zone is occupied cannot give away
-                # which block is the target. They keep clear of the container's zone.
-                free = [z for z in ZONES if z != con]
+
+                # Alternate depth within each (object, route) group rather than sampling it,
+                # for the same reason lighting is stratified: a shuffle left lighting 0.46
+                # correlated with route, and depth drawn at random would land the same way.
+                obj_row = ROWS[k % len(ROWS)]
+                con_row = ROWS[(k + 1) % len(ROWS)]
+
+                # Cells, not columns. A distractor in the target's column but at the other
+                # depth is a different place, and naming only the column leaves the depth to
+                # whoever is staging -- which is precisely the axis this sheet just gained.
+                # They keep clear of the target's cell and the container's, so which cell is
+                # occupied cannot give away which prop was named.
+                free = [c for c in CELLS
+                        if c not in (f"{obj}-{obj_row}", f"{con}-{con_row}")]
+                rng.shuffle(free)
                 dz = [free[i % len(free)] for i in range(len(picked))]
-                rng.shuffle(dz)
                 # A task whose sentence names the container has the OTHER container on the mat
                 # too, and it needs a zone -- otherwise the named one is the only place to put
                 # anything and the word carries nothing, the way the colour did when a single
@@ -134,20 +170,15 @@ def main() -> None:
                 if " in the " in v:
                     named = v.rsplit(" in the ", 1)[1].strip(". ")
                     alt = "pot" if named == "bowl" else "bowl"
-                    free_c = [z for z in ZONES if z not in (con, obj)] or \
-                             [z for z in ZONES if z != con]
+                    taken = {f"{obj}-{obj_row}", f"{con}-{con_row}", *dz}
+                    free_c = [c for c in CELLS if c not in taken] or \
+                             [c for c in CELLS if c != f"{con}-{con_row}"]
                     other_con = f"{alt}@{rng.choice(free_c)}"
-                # Alternate depth within each (object, route) group rather than sampling it,
-                # for the same reason lighting is stratified: a shuffle left lighting 0.46
-                # correlated with route, and depth drawn at random would land the same way.
-                obj_row = ROWS[k % len(ROWS)]
-                con_row = ROWS[(k + 1) % len(ROWS)]
                 rows.append({"variant": v, "object_zone": obj, "object_row": obj_row,
                              "container_zone": con, "container_row": con_row,
                              "route": f"{obj}->{con}", "other_container": other_con,
                              "distractors": "; ".join(
-                                 f"{short(o).split(' ->')[0]}@{z}" for o, z in zip(picked, dz))
-                                 or "(none)",
+                                 f"{o}@{z}" for o, z in zip(picked, dz)) or "(none)",
                              "lighting": a.lighting[k % len(a.lighting)],
                              "start_nudge": rng.choice(NUDGES)})
     rng.shuffle(rows)                      # order of recording only; the design is already set
@@ -164,11 +195,11 @@ def main() -> None:
           f"later, on the data)")
     print(f"zones: L / C / R across the mat, boundaries at -0.22 and +0.22 rad shoulder\n")
 
-    hdr = (f"{'target':<16} {'ep':>4} {'obj':>4} {'depth':>5} {'dest':>5} {'depth':>5} {'route':>7}  "
+    hdr = (f"{'target':<22} {'ep':>4} {'obj':>4} {'depth':>5} {'dest':>5} {'depth':>5} {'route':>7}  "
            f"{'other cont.':<11} {'also on the mat':<24} {'lighting':<28} start")
     print(hdr); print("-" * len(hdr))
     for r in rows[:16]:
-        print(f"{short(r['variant']):<16} {r['episode']:>4} {r['object_zone']:>4} "
+        print(f"{short(r['variant']):<22} {r['episode']:>4} {r['object_zone']:>4} "
               f"{r['object_row']:>5} {r['container_zone']:>5} {r['container_row']:>5} "
               f"{r['route']:>7}  {r['other_container']:<11} "
               f"{r['distractors']:<24} {r['lighting']:<28} {r['start_nudge']}")
