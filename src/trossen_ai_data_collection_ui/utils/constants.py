@@ -39,6 +39,12 @@ DATA_COLLECTION_PLAN_ROOT = Path.home() / ".trossen" / "trossen_ai_data_collecti
 # policy that each task had a fixed place to carry things to.
 STAGING_SHEET = DATA_COLLECTION_PLAN_ROOT / "staging_sheet.csv"
 
+# One row per KEPT episode: which staging row it was recorded under, and when. Without it the
+# sheet and the dataset cannot be joined -- a discarded take repeats a row, so the Nth episode
+# is not the Nth row -- and the conditions an episode was recorded under are unrecoverable.
+# That join is what lets a position or lighting OOD split be drawn later instead of re-shot.
+SESSION_LOG = DATA_COLLECTION_PLAN_ROOT / "session_log.csv"
+
 # Path to the data collection plan CSV (target vs. recorded episodes per task/object).
 # Auto-seeded from tasks.yaml and auto-updated as episodes are recorded; target_episodes
 # is left for the user to fill in and is never overwritten automatically.

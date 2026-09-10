@@ -105,6 +105,21 @@ the previous round.
 
 Both checks print with the sheet; both should read 0.00.
 
+## Every kept episode is logged with its conditions
+
+`~/.trossen/trossen_ai_data_collection/plan/session_log.csv` gets a row per kept episode:
+timestamp, episode index, staging row, instruction, and the zones, containers, distractors,
+lighting and start nudge it was recorded under.
+
+This join is not optional bookkeeping. A discarded take repeats its staging row, so episode N is
+not row N, and without the log the conditions behind an episode are unrecoverable — which means
+a position or lighting OOD split has to be re-shot rather than drawn from what you already have.
+
+The *measured* positions come from the data itself: `ood_split.py` recovers the arm's pose at
+the grasp and at the release, which is where the arm actually went rather than where the
+operator meant to put things. The log adds what the data cannot know — lighting, which blocks
+were out, which nudge was applied.
+
 ## Before you start: the app reads a different tasks.yaml
 
 The UI loads `~/.trossen/trossen_ai_data_collection/configs/tasks.yaml`, **not** the copy in

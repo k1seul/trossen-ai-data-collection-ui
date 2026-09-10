@@ -59,10 +59,13 @@ import yaml
 
 from trossen_ai_data_collection_ui.resources.app import Ui_MainWindow
 from trossen_ai_data_collection_ui.resources.calibration_menu import Ui_calibration_menu
+from datetime import datetime
+
 from trossen_ai_data_collection_ui.utils.constants import (
     DATA_COLLECTION_PLAN_CSV_PATH,
     DATA_COLLECTION_PLAN_MD_PATH,
     PACKAGE_ROOT,
+    SESSION_LOG,
     STAGING_SHEET,
     TROSSEN_AI_CALIBRATION_CONFIG_PATH_PERSISTENT,
     TROSSEN_AI_ROBOT_PATH_PERSISTENT,
@@ -769,6 +772,10 @@ class MainWindow(QMainWindow):
                 self.tasks_config = load_config()  # Reload the task configuration.
                 init_data_collection_plan(DATA_COLLECTION_PLAN_CSV_PATH, self.tasks_config)
                 render_data_collection_plan_md(DATA_COLLECTION_PLAN_CSV_PATH, DATA_COLLECTION_PLAN_MD_PATH)
+
+                # Join this episode to the staging row it was recorded under, so the conditions
+                # behind it -- zones, lighting, distractors, start nudge -- stay recoverable.
+                self.log_staged_episode(episode_idx, episode_instruction)
                 self.populate_task_combobox()  # Refresh the task selection combobox.
                 dialog.accept()  # Close the dialog.
             except yaml.YAMLError as e:
@@ -1758,6 +1765,31 @@ class MainWindow(QMainWindow):
             f"lighting {r.get('lighting', '-')}  |  start {r.get('start_nudge', '-')}",
             clear=False)
 
+    def log_staged_episode(self, episode_idx, instruction: str = "") -> None:
+        """Record which staging row this episode was actually recorded under.
+
+        A discarded take repeats its row, so episode N is not row N; without this join the
+        conditions behind an episode -- zones, lighting, distractors, start nudge -- cannot be
+        recovered, and a position or lighting OOD split has to be re-shot rather than drawn.
+        """
+        try:
+            import csv as _csv
+            row = (self.staging_rows[self.staging_idx]
+                   if self.staging_rows and self.staging_idx < len(self.staging_rows) else {})
+            rec = {"recorded_at": datetime.now().isoformat(timespec="seconds"),
+                   "episode_index": episode_idx,
+                   "staging_row": self.staging_idx + 1 if row else "",
+                   "instruction": instruction, **row}
+            SESSION_LOG.parent.mkdir(parents=True, exist_ok=True)
+            new = not SESSION_LOG.exists()
+            with open(SESSION_LOG, "a", newline="") as fh:
+                w = _csv.DictWriter(fh, fieldnames=list(rec))
+                if new:
+                    w.writeheader()
+                w.writerow(rec)
+        except Exception:
+            logger.exception("could not append to the session log")
+
     def advance_staging(self) -> None:
         """Move to the next row. Only a KEPT episode advances: a discarded take is re-recorded
         with the same staging, so the cell it belongs to still gets filled."""
@@ -2394,6 +2426,10 @@ class MainWindow(QMainWindow):
                     instruction=episode_instruction,
                 )
                 render_data_collection_plan_md(DATA_COLLECTION_PLAN_CSV_PATH, DATA_COLLECTION_PLAN_MD_PATH)
+
+                # Join this episode to the staging row it was recorded under, so the conditions
+                # behind it -- zones, lighting, distractors, start nudge -- stay recoverable.
+                self.log_staged_episode(episode_idx, episode_instruction)
 
                 recorded_episodes += 1
                 batched_episodes += 1
