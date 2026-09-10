@@ -105,6 +105,19 @@ the previous round.
 
 Both checks print with the sheet; both should read 0.00.
 
+## Before you start: the app reads a different tasks.yaml
+
+The UI loads `~/.trossen/trossen_ai_data_collection/configs/tasks.yaml`, **not** the copy in
+this repo. Editing the repo's copy alone changes nothing the operator will see -- a new task
+simply will not appear in the dropdown. After changing task config here:
+
+```bash
+cp src/trossen_ai_data_collection_ui/configs/tasks.yaml \
+   ~/.trossen/trossen_ai_data_collection/configs/tasks.yaml
+```
+
+(Back up the persistent one first if it has been edited through the app's own dialog.)
+
 ## The sheet appears in the app
 
 `scripts/staging_plan.py --csv ~/.trossen/trossen_ai_data_collection/plan/staging_sheet.csv`
