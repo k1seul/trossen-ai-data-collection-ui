@@ -64,6 +64,13 @@ FRAMING_WORKSPACE = FRAMING_ROOT / "workspace.json"
 # view would be worse than not drawing it.
 FRAMING_CAMERA = "cam_high"
 
+# One JSON per KEPT episode: the staging row it was recorded under, the scene resolved into
+# a list of objects and zones, the crop the policy will see, and what the camera check said at
+# the moment the episode started. The session log is a CSV and has to stay one flat row per
+# episode; this is where anything shaped -- lists, the framing verdict -- can live, and it is
+# what makes a scene reproducible object by object rather than from a semicolon-joined string.
+EPISODE_CONFIG_ROOT = DATA_COLLECTION_PLAN_ROOT / "episodes"
+
 # Path to the data collection plan CSV (target vs. recorded episodes per task/object).
 # Auto-seeded from tasks.yaml and auto-updated as episodes are recorded; target_episodes
 # is left for the user to fill in and is never overwritten automatically.

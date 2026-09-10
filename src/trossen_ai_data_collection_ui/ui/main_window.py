@@ -1,9 +1,11 @@
 from collections import deque
 from functools import wraps
 import html
+import json
 import logging
 import math
 import os
+from pathlib import Path
 import re
 import threading
 import time
@@ -74,6 +76,7 @@ from trossen_ai_data_collection_ui.utils.constants import (
     DATA_COLLECTION_PLAN_CSV_PATH,
     DATA_COLLECTION_PLAN_MD_PATH,
     PACKAGE_ROOT,
+    EPISODE_CONFIG_ROOT,
     FRAMING_CAMERA,
     FRAMING_REFERENCE,
     FRAMING_WORKSPACE,
@@ -1978,6 +1981,91 @@ class MainWindow(QMainWindow):
         ("start_nudge", "Start pose", "nudge the arm off the home pose by this"),
     ]
 
+    @staticmethod
+    def scene_from_row(row: dict) -> list[dict]:
+        """A staging row as the list of things that go on the mat, each with its zone.
+
+        The row stores the target and the distractors in different fields and different
+        formats, which is fine for a spreadsheet and wrong for setting up a scene: the operator
+        has to be told what to put down, all of it, in one list. Resolving it here also gives
+        the per-episode config something object-shaped to record instead of a joined string.
+        """
+        scene = []
+        target = (row.get("variant") or "").strip()
+        if target:
+            # A variant is either a bare object name or a whole instruction, depending on the
+            # task. What goes on the mat is the object either way, and printing the sentence
+            # where a prop name belongs makes the list harder to read at the moment it is
+            # being worked through.
+            name = target
+            if " in the " in name:
+                name = name.rsplit(" in the ", 1)[0]
+                name = name.replace("Pick up the ", "").rsplit(" and place it", 1)[0].strip()
+            scene.append({"object": name or target, "zone": row.get("object_zone", "?"),
+                          "role": "target"})
+        container = row.get("container_zone")
+        if container:
+            # Which container it is comes from the instruction, not from the row: on
+            # block_to_named_container the sentence is what names it, and calling it "bowl"
+            # there would tell the operator to set up the wrong task.
+            named = "bowl"
+            if " in the " in target:
+                named = target.rsplit(" in the ", 1)[1].strip(". ") or "bowl"
+            scene.append({"object": named, "zone": container, "role": "container"})
+        other = (row.get("other_container") or "").strip()
+        if other and other != "(none)":
+            name, _, zone = other.partition("@")
+            scene.append({"object": name.strip(), "zone": zone.strip() or "?",
+                          "role": "other container"})
+        distractors = (row.get("distractors") or "").strip()
+        if distractors and distractors != "(none)":
+            for item in distractors.split(";"):
+                item = item.strip()
+                if not item:
+                    continue
+                name, _, zone = item.partition("@")
+                scene.append({"object": name.strip(), "zone": zone.strip() or "?",
+                              "role": "distractor"})
+        return scene
+
+    def save_episode_config(self, episode_idx, instruction: str = "") -> "Path | None":
+        """Write everything about this episode's scene, as one file, when it is kept.
+
+        The session log is a flat CSV and cannot hold the object list, and reconstructing a
+        scene from "green block@R; red block@L" months later means re-parsing a display string
+        and hoping its format never changed. Recording the resolved objects, the crop and the
+        camera verdict instead makes each episode answerable on its own.
+        """
+        try:
+            row = (self.staging_rows[self.staging_idx]
+                   if self.staging_rows and self.staging_idx < len(self.staging_rows) else {})
+            cam_ok, cam_msg = (None, "not checked")
+            if self.framing is not None and self.last_main_frame is not None:
+                cam_ok, cam_msg = framing_utils.check(self.framing, self.last_main_frame)
+            rec = {
+                "recorded_at": datetime.now().isoformat(timespec="seconds"),
+                "task": self.selected_task,
+                "episode_index": episode_idx,
+                "staging_row": self.staging_idx + 1 if row else None,
+                "instruction": instruction,
+                "scene": self.scene_from_row(row) if row else [],
+                "lighting": row.get("lighting"),
+                "start_nudge": row.get("start_nudge"),
+                "route": row.get("route"),
+                "crop_main": list(self.framing.crop) if (self.framing and self.framing.crop)
+                             else None,
+                "camera_check": {"ok": cam_ok, "message": cam_msg},
+                "staging_raw": dict(row),
+            }
+            EPISODE_CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
+            path = EPISODE_CONFIG_ROOT / f"{self.selected_task}_{int(episode_idx):05d}.json"
+            path.write_text(json.dumps(rec, indent=2, ensure_ascii=False))
+            logger.info(f"episode config: {path}")
+            return path
+        except Exception:
+            logger.exception("could not write the episode config")
+            return None
+
     def show_setup_gate(self) -> None:
         """Ask whether the scene matches the staging row, and say what has to change.
 
@@ -2024,17 +2112,50 @@ class MainWindow(QMainWindow):
                 same.setStyleSheet("color: #2e7d32;")
                 left.addWidget(same)
 
+            # What actually has to happen, object by object. The row keeps the target and the
+            # distractors in separate fields, which is fine for a spreadsheet and useless when
+            # the job is to put things on a mat: what is needed is one list of everything that
+            # goes down, and one of what has to come off. Setting up from the fields instead is
+            # how a distractor from the previous episode gets left on the table.
+            scene = self.scene_from_row(row)
+            prev_scene = self.scene_from_row(prev) if prev else []
+            prev_by_object = {s["object"]: s["zone"] for s in prev_scene}
+            place = QLabel("PLACE ON THE MAT", dialog)
+            place.setStyleSheet("font-weight: bold;")
+            left.addWidget(place)
             grid = QFormLayout()
+            for s in scene:
+                was = prev_by_object.get(s["object"])
+                moved = was is None or was != s["zone"]
+                w = QLabel(f"zone {s['zone']}" + ("" if was is None else f"   (was {was})"),
+                           dialog)
+                if moved and prev:
+                    w.setStyleSheet("color: #c62828; font-weight: bold;")
+                name = f"{s['object']}  [{s['role']}]"
+                grid.addRow(QLabel(("MOVE  " if moved and prev else "keep  ") + name, dialog), w)
+            left.addLayout(grid)
+
+            here = {s["object"] for s in scene}
+            gone = [o for o in prev_by_object if o not in here]
+            if gone:
+                rm = QLabel("TAKE OFF THE MAT: " + ", ".join(sorted(gone)), dialog)
+                rm.setStyleSheet("color: #c62828; font-weight: bold;")
+                rm.setWordWrap(True)
+                left.addWidget(rm)
+
+            rest = QFormLayout()
             for key, label, hint in self.SETUP_STEPS:
-                value = row.get(key, "-") or "-"
-                w = QLabel(value, dialog)
+                if key in ("variant", "object_zone", "container_zone", "other_container",
+                           "distractors"):
+                    continue                     # already spelled out object by object above
+                w = QLabel(row.get(key, "-") or "-", dialog)
                 w.setWordWrap(True)
                 w.setToolTip(hint)
                 if key in changed:
                     w.setStyleSheet("color: #c62828; font-weight: bold;")
                     label = f"CHANGE  {label}"
-                grid.addRow(QLabel(label, dialog), w)
-            left.addLayout(grid)
+                rest.addRow(QLabel(label, dialog), w)
+            left.addLayout(rest)
 
         self.gate_status = QLabel("", dialog)
         self.gate_status.setWordWrap(True)
@@ -2157,6 +2278,8 @@ class MainWindow(QMainWindow):
                 w.writerow(rec)
         except Exception:
             logger.exception("could not append to the session log")
+        # Same moment, richer record: the CSV keeps the join, the JSON keeps the scene.
+        self.save_episode_config(episode_idx, instruction)
 
     def advance_staging(self) -> None:
         """Move to the next row. Only a KEPT episode advances: a discarded take is re-recorded
