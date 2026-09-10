@@ -65,7 +65,13 @@ def target_object(v: str) -> str:
 #
 # What collection must deliver instead is COVERAGE and DECORRELATION: every route, every
 # lighting condition, every object, in combinations that do not line up with one another.
-LIGHTING = ["A: overheads on", "B: overheads off + lamp", "C: blinds open, overheads off"]
+# What this room can actually do. The overheads stay on: measured, the table sits at V 150
+# with them and V 157 with the sub lamp added, but with them OFF the props stop being visible
+# at all -- and an unseen-lighting axis built from conditions nobody can reproduce is an axis
+# that gets approximated at the bench and then analysed as though it were real.
+#
+# Two levels rather than three. Fewer than hoped, but both are a switch someone can flick.
+LIGHTING = ["A: overheads only", "B: overheads + sub lamp"]
 
 NUDGES = ["none", "shoulder +5deg", "shoulder -5deg", "elbow +5deg", "wrist +10deg"]
 
