@@ -1,5 +1,6 @@
 from collections import deque
 from functools import wraps
+import gc
 import html
 import json
 import logging
@@ -1912,30 +1913,58 @@ class MainWindow(QMainWindow):
             logger.warning(f"no serial number for '{FRAMING_CAMERA}' in the robot config")
             return None
 
-        pipeline = rs.pipeline()
-        rs_cfg = rs.config()
-        rs_cfg.enable_device(str(cam["serial_number"]))
-        rs_cfg.enable_stream(
-            rs.stream.color, int(cam.get("width", 640)), int(cam.get("height", 480)),
-            rs.format.rgb8, int(cam.get("fps", 30)),
-        )
-        try:
-            pipeline.start(rs_cfg)
-            frame = None
-            for _ in range(8):                      # let auto-exposure settle
-                fs = pipeline.wait_for_frames(2000)
-                c = fs.get_color_frame()
-                if c:
-                    frame = np.asanyarray(c.get_data())
-            return None if frame is None else frame.copy()
-        except Exception as e:
-            logger.error(f"could not open '{FRAMING_CAMERA}' (serial {cam['serial_number']}): {e}")
-            return None
-        finally:
+        serial = str(cam["serial_number"])
+        width, height = int(cam.get("width", 640)), int(cam.get("height", 480))
+        fps = int(cam.get("fps", 30))
+
+        def grab_once():
+            """Open, take a few frames so auto-exposure settles, and let go completely.
+
+            Letting go is the part that matters. pipeline.stop() is not enough on its own: the
+            pipeline and config objects keep the device claimed until they are collected, and
+            a device still claimed is one the recorder cannot open -- which is why a framing
+            check used to have to be followed by a camera reset.
+            """
+            pipeline = rs.pipeline()
+            rs_cfg = rs.config()
+            rs_cfg.enable_device(serial)
+            rs_cfg.enable_stream(rs.stream.color, width, height, rs.format.rgb8, fps)
             try:
-                pipeline.stop()
-            except Exception:
-                pass
+                pipeline.start(rs_cfg)
+                frame = None
+                for _ in range(8):
+                    fs = pipeline.wait_for_frames(2000)
+                    c = fs.get_color_frame()
+                    if c:
+                        frame = np.asanyarray(c.get_data())
+                return None if frame is None else frame.copy()
+            finally:
+                try:
+                    pipeline.stop()
+                except Exception:
+                    pass
+                del rs_cfg, pipeline
+                gc.collect()
+
+        try:
+            return grab_once()
+        except Exception as e:
+            # Usually the device is still held from a previous open. Reset that one camera and
+            # try once more, rather than leaving the operator to press Reset Cameras and guess
+            # that this was why.
+            logger.warning(f"'{FRAMING_CAMERA}' (serial {serial}) did not open: {e}; "
+                           f"resetting it and retrying once")
+            self.set_logs(f"{FRAMING_CAMERA} busy -- resetting it...", clear=False)
+            try:
+                for device in rs.context().query_devices():
+                    if device.get_info(rs.camera_info.serial_number) == serial:
+                        device.hardware_reset()
+                        break
+                time.sleep(3.0)                     # the device re-enumerates on USB
+                return grab_once()
+            except Exception as e2:
+                logger.error(f"could not open '{FRAMING_CAMERA}' (serial {serial}): {e2}")
+                return None
 
     def check_camera_framing(self, quiet: bool = False) -> bool:
         """Compare the live main camera against the frame the policy's crop was measured on.

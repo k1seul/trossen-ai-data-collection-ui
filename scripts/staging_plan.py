@@ -111,16 +111,19 @@ def main() -> None:
                         "a colour later would measure nothing. 0 reproduces the old scenes.")
     p.add_argument("--props", nargs="+", default=PROPS,
                    help="the props physically on the bench, which distractors are drawn from. "
-                        "Defaults to four blocks and four tape rolls; pass the real list if "
-                        "the bench differs, since a sheet asking for a prop nobody has gets "
-                        "improvised.")
+                        "Defaults to the task's own `props:` list, then to four blocks and "
+                        "four tape rolls. Pass it only to override, since a sheet asking for a "
+                        "prop nobody has gets improvised.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--csv", type=Path, default=None)
     a = p.parse_args()
 
     task = load_task(a.config, a.task)
     variants = task["task_objects"]
-    props = list(a.props)
+    # The bench comes from the task itself when it says so, and the flag is the override. A
+    # task and the props it needs belong together in one block; keeping them apart is how a
+    # sheet comes to ask for something nobody has.
+    props = list(a.props) if a.props is not PROPS else list(task.get("props") or PROPS)
     missing = sorted({target_object(v) for v in variants} - set(props))
     if missing:
         raise SystemExit(f"{a.task} names props that are not on the bench: {missing}\n"
