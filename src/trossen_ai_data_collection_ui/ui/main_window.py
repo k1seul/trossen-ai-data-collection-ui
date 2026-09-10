@@ -2121,10 +2121,24 @@ class MainWindow(QMainWindow):
         to pick, and the demonstration teaches the policy to ignore it.
         """
         want = (row.get("variant") or "").strip()
+        self._staging_task_mismatch = None
         if not want:
             return self.get_current_instruction()
         box = self.ui.comboBox_episode_object
         idx = box.findText(want)
+        if idx < 0 and box.isEditable():
+            # Substituting a whole instruction into an {object} slot yields "Pick up the Pick
+            # up the blue block and place it in the pot. and place it in the bowl." -- which is
+            # what a sheet built for another task produces, and it would be recorded verbatim.
+            # Say the sheet is wrong instead of improvising a sentence out of it.
+            task_config = self.get_task_parameters(self.selected_task) or {}
+            if want not in (task_config.get("task_objects") or []):
+                self._staging_task_mismatch = want
+                logger.warning(
+                    f"staging row names '{want}', which is not among '{self.selected_task}'"
+                    f"'s objects -- the sheet was generated for another task"
+                )
+                return self.get_current_instruction()
         box.blockSignals(True)
         try:
             if idx >= 0:
@@ -2132,6 +2146,7 @@ class MainWindow(QMainWindow):
             elif box.isEditable():
                 box.setEditText(want)
             else:
+                self._staging_task_mismatch = want
                 logger.warning(
                     f"staging row names '{want}', which is not among this task's objects; "
                     f"the sheet may have been generated for another task"
@@ -2254,7 +2269,24 @@ class MainWindow(QMainWindow):
         live.setWordWrap(True)
         left.addWidget(live)
 
+        mismatch = getattr(self, "_staging_task_mismatch", None)
+        if mismatch:
+            warn = QLabel(
+                f"This staging sheet is for a different task. It asks for\n"
+                f"    \u201c{mismatch}\u201d\n"
+                f"which is not one of '{self.selected_task}'s objects, so the sentence "
+                f"recorded would not describe the scene.\n\n"
+                f"Regenerate the sheet for this task:\n"
+                f"    python scripts/staging_plan.py --task {self.selected_task} "
+                f"--csv <staging_sheet.csv>", dialog)
+            warn.setStyleSheet("color: #c62828; font-weight: bold;")
+            warn.setWordWrap(True)
+            left.addWidget(warn)
+
         start = QPushButton("Setup done -- start recording  (G)", dialog)
+        if mismatch:
+            start.setEnabled(False)
+            start.setText("Sheet is for another task -- cannot record")
         start.setStyleSheet("font-weight: bold; padding: 8px;")
         start.setDefault(True)
         skip = QPushButton("Skip this staging row", dialog)
@@ -3041,6 +3073,16 @@ class MainWindow(QMainWindow):
                 # a start key that is also a stop key is one slip from a discarded take.
                 if self.wait_for_start(cfg, robot):
                     break
+
+                # Read it AGAIN, now that the gate has closed. The gate points the object
+                # combobox at the staging row's prop, and it opens inside wait_for_start -- so
+                # the sentence read above is the one from before the row was applied, which is
+                # the previous episode's. The first episode of a session recorded "Pick up the
+                # red block" for a row asking for a blue block, and nothing downstream could
+                # tell that from a demonstration of ignoring the instruction.
+                episode_instruction = self.get_current_instruction()
+                self.log_signal.emit(
+                    colored(f"recording: {episode_instruction}", "yellow"), False)
 
                 # Enable rerecord, finish and fail buttons during episode recording
                 self.ui.pushButton_rerecord.setEnabled(True)
