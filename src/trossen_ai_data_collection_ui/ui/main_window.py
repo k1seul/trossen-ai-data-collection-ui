@@ -2103,6 +2103,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel(
             "Orange box: what the policy sees. Anything staged outside it is invisible to the "
             "policy, however clean the demonstration.", dialog))
+
+        if not ok:
+            adopt = QPushButton("Move the crop to where the camera is now", dialog)
+            adopt.setToolTip("Carries the workspace marks across the measured shift and "
+                             "re-derives the crop, so the mount does not have to be nudged "
+                             "back by hand.")
+            adopt.setStyleSheet("font-weight: bold; padding: 6px;")
+
+            def do_adopt():
+                if self.adopt_camera_framing(rgb):
+                    dialog.accept()
+
+            adopt.clicked.connect(do_adopt)
+            layout.addWidget(adopt)
+
         close = QPushButton("Close", dialog)
         close.clicked.connect(dialog.accept)
         layout.addWidget(close)
@@ -2452,13 +2467,21 @@ class MainWindow(QMainWindow):
             left.addWidget(warn)
 
         if row is not None:
+            # Narrow and pinned left. At full width these two stretched the checklist column
+            # and pushed the camera preview off the side of the dialog, which is the one thing
+            # on it that has to stay large.
             learn = QHBoxLayout()
-            learn.addWidget(QLabel("Learn this light as:", dialog))
+            lab = QLabel("learn light:", dialog)
+            lab.setStyleSheet("color: #777; font-size: 11px;")
+            learn.addWidget(lab)
             for name in ("A: overheads only", "B: overheads + sub lamp"):
                 b = QPushButton(name.split(":")[0], dialog)
                 b.setToolTip(f"Record what the mat looks like right now as '{name}'")
+                b.setFixedWidth(34)
+                b.setFocusPolicy(Qt.NoFocus)     # so Space cannot reach it
                 b.clicked.connect(lambda _=False, n=name: self.learn_lighting(n))
                 learn.addWidget(b)
+            learn.addStretch(1)
             left.addLayout(learn)
 
         home = QPushButton("Arm to start pose  (H)", dialog)
@@ -2690,6 +2713,44 @@ class MainWindow(QMainWindow):
             self.gate_status.setText("Scene does NOT match the staging row:\n" + body)
             self.gate_status.setStyleSheet("color: #c62828; font-family: monospace; "
                                            "font-weight: bold;")
+
+    def adopt_camera_framing(self, rgb) -> bool:
+        """Re-derive the crop for where the camera is now, and start using it.
+
+        The alternative is nudging a mount back to within eight pixels by hand, which nobody
+        can do -- so without this a knocked camera means every later episode is recorded
+        against a crop that no longer frames what it was measured on, and the check can only
+        keep saying so.
+        """
+        if self.framing is None:
+            self.set_logs("No framing reference to move.", clear=False)
+            return False
+        try:
+            meta = json.loads(FRAMING_WORKSPACE.read_text())
+        except Exception:
+            logger.exception("could not read the workspace file")
+            self.set_logs(f"Could not read {FRAMING_WORKSPACE}.", clear=False)
+            return False
+        new, msg = framing_utils.adopt_crop(meta, self.framing.reference, rgb)
+        if new is None:
+            logger.warning(f"crop not moved: {msg}")
+            QMessageBox.warning(self, "Camera framing", msg)
+            return False
+        stamp = datetime.now().strftime("%H%M%S")
+        try:
+            FRAMING_WORKSPACE.replace(FRAMING_WORKSPACE.with_suffix(f".json.bak{stamp}"))
+            FRAMING_REFERENCE.replace(FRAMING_REFERENCE.with_suffix(f".png.bak{stamp}"))
+            FRAMING_WORKSPACE.write_text(json.dumps(new, indent=2, ensure_ascii=False))
+            cv2.imwrite(str(FRAMING_REFERENCE), cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        except Exception:
+            logger.exception("could not write the new framing")
+            self.set_logs("Could not write the new framing -- see the log.", clear=False)
+            return False
+        self.framing = framing_utils.Framing.load(FRAMING_REFERENCE, FRAMING_WORKSPACE)
+        logger.info(f"adopted framing: {msg}")
+        self.set_logs(f"{msg}\nEpisodes recorded before now belong to the previous "
+                      f"reference, kept as .bak{stamp}.", clear=False)
+        return True
 
     def show_staging(self) -> None:
         """Put the current staging row in the log, where the operator is already looking."""

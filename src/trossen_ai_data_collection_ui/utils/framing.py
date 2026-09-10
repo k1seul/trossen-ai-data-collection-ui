@@ -522,6 +522,59 @@ def draw_zones(bgr: np.ndarray, crop: "tuple[int, int, int] | None",
     return bgr
 
 
+def square_crop(pts, w: int, h: int, margin: int) -> "tuple[int,int,int]":
+    """Smallest square window holding every point plus a margin, clamped to the frame."""
+    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+    x0, x1 = min(xs) - margin, max(xs) + margin
+    y0, y1 = min(ys) - margin, max(ys) + margin
+    side = int(min(np.ceil(max(x1 - x0, y1 - y0)), min(w, h)))
+    cx = int(round((x0 + x1) / 2 - side / 2))
+    cy = int(round((y0 + y1) / 2 - side / 2))
+    return max(0, min(cx, w - side)), max(0, min(cy, h - side)), side
+
+
+def adopt_crop(meta: dict, ref_gray: np.ndarray, cur_rgb: np.ndarray,
+               margin: int = 30) -> "tuple[dict | None, str]":
+    """Move the crop to where the camera is now, rather than the camera back to the crop.
+
+    Putting a mount back to within eight pixels by hand is not something a person can do, so a
+    camera that gets knocked otherwise means every later episode is recorded against a crop
+    that no longer frames what it was measured on.
+
+    The workspace did not move; the camera did. The marks are still the right places, at
+    different pixels, and the transform between the two views is the one the check already
+    measures -- so carrying the marks across it restores the framing with nobody touching the
+    mount. Returns (new metadata, message), or (None, why not).
+    """
+    marks = meta.get("marks") or []
+    if not marks:
+        return None, "the workspace file has no marks to move"
+    cur_gray = cv2.cvtColor(cur_rgb, cv2.COLOR_RGB2GRAY)
+    if cur_gray.shape != ref_gray.shape:
+        return None, "the camera's frame size has changed; re-mark the workspace"
+    dx, dy, rot = rigid_shift(ref_gray, cur_gray)
+    h, w = cur_gray.shape[:2]
+    th = np.radians(rot); cx0, cy0 = w / 2.0, h / 2.0
+    moved = []
+    for m in marks:
+        x, y = float(m["x"]) - cx0, float(m["y"]) - cy0
+        moved.append({**m,
+                      "x": x * np.cos(th) - y * np.sin(th) + cx0 + dx,
+                      "y": x * np.sin(th) + y * np.cos(th) + cy0 + dy})
+    pts = [(m["x"], m["y"]) for m in moved]
+    if not all(0 <= x < w and 0 <= y < h for x, y in pts):
+        return None, ("the marks would land outside the frame -- the camera has moved too far "
+                      "to carry, so it has to go back or the workspace be re-marked")
+    cx, cy, side = square_crop(pts, w, h, margin)
+    new = {**meta, "frame": [w, h], "margin": margin, "crop_main": [cx, cy, side],
+           "marks": moved,
+           "adopted": {"from": meta.get("crop_main"),
+                       "shift_px": [round(float(dx), 1), round(float(dy), 1)],
+                       "rotation_deg": round(float(rot), 2)}}
+    return new, (f"crop moved by ({dx:+.0f}, {dy:+.0f}) px, {rot:+.2f} deg: "
+                 f"{meta.get('crop_main')} -> [{cx}, {cy}, {side}]")
+
+
 def lighting_signature(rgb: np.ndarray, crop: "tuple[int,int,int] | None",
                        skip_top: int = 0) -> dict:
     """What the mat looks like under the light currently on.
