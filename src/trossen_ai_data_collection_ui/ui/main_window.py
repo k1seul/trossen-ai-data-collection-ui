@@ -2210,7 +2210,12 @@ class MainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Set up the scene")
-        dialog.setModal(True)
+        # A plain modal child of a FULLSCREEN main window can be stacked behind it by the
+        # window manager, which looks exactly like the gate never opening: the episode waits,
+        # the log stops (wait_for_start reports to the UI pane, not the log file), and there is
+        # nothing on screen. Keep it above and take focus explicitly.
+        dialog.setWindowModality(Qt.ApplicationModal)
+        dialog.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         outer = QHBoxLayout(dialog)
 
         left = QVBoxLayout()
@@ -2225,7 +2230,7 @@ class MainWindow(QMainWindow):
             # it is open the combobox behind it cannot be reached -- and this is the moment the
             # object is actually being decided, with the scene in front of you.
             pick = QHBoxLayout()
-            pick.addWidget(QLabel("Object:", dialog))
+            pick.addWidget(QLabel("Object (from the sheet):", dialog))
             self.gate_object = QComboBox(dialog)
             self.gate_object.setEditable(self.ui.comboBox_episode_object.isEditable())
             src = self.ui.comboBox_episode_object
@@ -2363,7 +2368,9 @@ class MainWindow(QMainWindow):
         outer.addLayout(left, 0)
 
         self.gate_preview = QLabel(dialog)
-        self.gate_preview.setMinimumSize(640, 480)
+        # Not a minimum: a minimum plus the checklist can make the dialog wider than the
+        # screen, which is another way for it to end up somewhere nobody can see.
+        self.gate_preview.setMinimumSize(320, 240)
         outer.addWidget(self.gate_preview, 1)
 
         # The camera keeps running while the gate is up, which is the point: the scene is being
@@ -2398,7 +2405,17 @@ class MainWindow(QMainWindow):
         # placed by looking at the big picture, not at a thumbnail beside a checklist.
         self.staging_active = True
         self._refresh_setup_gate()
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            dialog.resize(min(1180, avail.width() - 80), min(760, avail.height() - 80))
+            dialog.move(avail.center() - dialog.rect().center())
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        logger.info("setup gate opened")
         dialog.exec()
+        logger.info("setup gate closed")
         timer.stop()
         self.staging_active = False
         self._gate_dialog = None
