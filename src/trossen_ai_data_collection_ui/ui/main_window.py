@@ -2542,11 +2542,19 @@ class MainWindow(QMainWindow):
         if teleoperate:
             self.update_speed_warning(0.0)  # Clear the warning once teleoperation stops.
 
-    def wait_for_start(self, cfg) -> bool:
+    def wait_for_start(self, cfg, robot=None) -> bool:
         """Block the recording thread until G (go), or a stop. Returns True if we should stop.
 
         Runs on the worker thread; the flags are set from the UI thread, which is why this
         polls a flag rather than touching Qt.
+
+        It also keeps the cameras running while it waits. Frames otherwise only come from the
+        control loop, which is not running yet -- so the feed and the setup gate both froze on
+        whatever was in front of the camera when the previous episode ended, and a gate that
+        checks the scene against a stale frame is worse than one that checks nothing: it
+        reports the last episode's layout as if it were this one's.
+
+        Observations only, never teleop_step: nothing here should move the arm.
         """
         self.events["start_episode"] = False
         self.log_signal.emit(
@@ -2555,10 +2563,26 @@ class MainWindow(QMainWindow):
         # Queued to the UI thread, which owns the widgets. The gate sets the same flag G does,
         # so this loop needs no other change and G keeps working with the dialog closed.
         self.setup_gate_signal.emit()
+
+        keys, last, warned = None, 0.0, False
         while not self.events["start_episode"]:
             if self.events["stop_recording"] or self.events.get("emergency"):
                 return True
-            time.sleep(0.05)
+            now = time.perf_counter()
+            if robot is not None and now - last >= 0.1:   # 10 Hz is plenty for staging
+                last = now
+                try:
+                    obs = robot.capture_observation()
+                    if keys is None:
+                        keys = [k for k in obs if "image" in k]
+                        self.worker.camera_labels_update.emit(keys[:4])
+                    for i, k in enumerate(keys[:4]):
+                        self.worker.image_update.emit(i, obs[k].numpy())
+                except Exception:
+                    if not warned:                        # once, not ten times a second
+                        warned = True
+                        logger.exception("could not read the cameras while waiting to start")
+            time.sleep(0.02)
         self.events["start_episode"] = False
         return False
 
@@ -2827,7 +2851,7 @@ class MainWindow(QMainWindow):
                 # episode left, and staging has to be finished before the clock is running.
                 # Space is deliberately NOT the key: it means "finish" a few seconds later, and
                 # a start key that is also a stop key is one slip from a discarded take.
-                if self.wait_for_start(cfg):
+                if self.wait_for_start(cfg, robot):
                     break
 
                 # Enable rerecord, finish and fail buttons during episode recording
