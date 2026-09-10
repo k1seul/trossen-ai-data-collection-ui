@@ -145,9 +145,21 @@ The 0.02–0.05 band should be well above 15%, not 2%.
    see: it will make small errors at deployment, because it acts on an observation 220 ms old.
    Use "Fail episode" only for a genuinely spoiled take (object knocked off the mat, operator
    error).
-6. **Press "Finish episode" as soon as the object is in the container.** Do not wait out the
-   clock. The previous round ran every episode to its full 18 s and the tail was motionless —
-   14.7% of all frames, teaching the arm to sit still.
+6. **Press `Space` as soon as the object is in the container.** That is "Finish episode": the
+   take is kept and the next one begins. `episode_length_s` is now only an upper bound (45 s
+   for this task), long enough for a recovery attempt — it is not the intended length. The
+   previous round set it to the intended length, nobody ended early, and the last fifth of
+   every episode was the arm sitting still: 14.7% of all recorded frames.
+
+### Keys, so a hand can stay on the leader arm
+
+| key | |
+|---|---|
+| **`Space`** or `S` | finish the episode now and **keep** it — the object is placed |
+| `F` | discard this take and move on — spoiled, e.g. the fruit went off the mat |
+| `R` | stop waiting out the reset — the scene is re-staged |
+
+Reaching for the mouse is what made every episode run its clock out last time.
 
 ## Keep recording all three cameras
 

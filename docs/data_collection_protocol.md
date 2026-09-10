@@ -128,7 +128,8 @@ correlated with which object is named — the defect that produced "banana means
      EPISODE NEXT**.
 5. Reposition the object **and the container** during the automatic reset phase, following
    the staging sheet, and apply the start-pose nudge.
-6. **Press "Finish episode" as soon as the object is in the container.** Do not wait out the
+6. **Press `Space` as soon as the object is in the container** ("Finish episode"; `F` discards
+   a spoiled take, `R` skips the rest of a reset). Do not wait out the
    clock: the previous round ran every episode to its full `episode_length_s`, and the last
    20% of each one was the arm sitting motionless — a fifth of the training data.
 7. **If a grasp misses, recover within the episode and keep it.** "Fail episode" discards the

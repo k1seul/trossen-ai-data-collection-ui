@@ -564,6 +564,25 @@ class MainWindow(QMainWindow):
         # only relevant (and enabled) while a reset is actually in progress.
         self.ui.pushButton_skip_reset.clicked.connect(self.set_skip_reset)
 
+        # Keyboard shortcuts for the three things the operator does with a hand already busy
+        # on the leader arm. Reaching for the mouse to end a take is what made every episode
+        # run its full clock in the previous round, and a fifth of that data was the arm
+        # sitting still afterwards.
+        #
+        #   Space / S  finish the episode now and KEEP it   (the object is placed)
+        #   F          discard this take and move on        (spoiled: knocked off the mat)
+        #   R          stop waiting out the reset           (scene is re-staged)
+        self.episode_shortcuts = []
+        for keys, slot in (
+            (("Space", "S"), self.set_finish_episode),
+            (("F",), self.set_fail_episode),
+            (("R",), self.set_skip_reset),
+        ):
+            for k in keys:
+                sc = QShortcut(QKeySequence(k), self)
+                sc.activated.connect(slot)
+                self.episode_shortcuts.append(sc)
+
         # Connect reset buttons.
         self.ui.pushButton_resetarms.clicked.connect(self.start_reset_arms)
         self.ui.pushButton_resetcameras.clicked.connect(self.hardware_reset_cameras)

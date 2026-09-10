@@ -1,4 +1,9 @@
 tasks:
+  # episode_length_s is an UPPER BOUND, not the intended length. The operator ends the take with
+  # Space the moment the object is placed; these values only have to leave room for a recovery
+  # attempt when the first grasp or placement misses. The previous round set it to the intended
+  # length and nobody ended early, so every episode ran the clock out and the last fifth of each
+  # one was the arm sitting still -- 14.7% of all recorded frames.
   # ===========================================================================
   # Difficulty Tier 1 (easy): single object type, large forgiving container.
   # ===========================================================================
@@ -10,7 +15,7 @@ tasks:
       - "blue block"
       - "green block"
       - "yellow block"
-    episode_length_s: 15
+    episode_length_s: 40
     warmup_time_s: 5
     reset_time_s: 15
     long_reset_interval: 10
@@ -35,7 +40,7 @@ tasks:
       - "blue block"
       - "green block"
       - "yellow block"
-    episode_length_s: 15
+    episode_length_s: 40
     warmup_time_s: 5
     reset_time_s: 15
     long_reset_interval: 10
@@ -60,7 +65,7 @@ tasks:
       - "banana"
       - "apple"
       - "peach"
-    episode_length_s: 18
+    episode_length_s: 45
     warmup_time_s: 5
     reset_time_s: 15
     long_reset_interval: 10
@@ -91,7 +96,7 @@ tasks:
       - "Pick up the green tape and stack it on top of the purple tape."
       - "Pick up the purple tape and stack it on top of the yellow tape."
       - "Pick up the yellow tape and stack it on top of the red tape."
-    episode_length_s: 20
+    episode_length_s: 45
     warmup_time_s: 5
     reset_time_s: 15
     long_reset_interval: 10
@@ -118,7 +123,7 @@ tasks:
       - "Pick up the blue block and place it in the bowl, then pick up the green block and place it in the bowl."
       - "Pick up the green block and place it in the bowl, then pick up the yellow block and place it in the bowl."
       - "Pick up the yellow block and place it in the bowl, then pick up the red block and place it in the bowl."
-    episode_length_s: 35
+    episode_length_s: 75
     warmup_time_s: 10
     reset_time_s: 20
     long_reset_interval: 10
@@ -148,7 +153,7 @@ tasks:
       - "banana"
       - "apple"
       - "peach"
-    episode_length_s: 20
+    episode_length_s: 45
     warmup_time_s: 10
     reset_time_s: 25
     long_reset_interval: 10
@@ -176,7 +181,7 @@ tasks:
       - "Pick up the green block and place it in zone C."
       - "Pick up the orange and place it in zone A."
       - "Pick up the banana and place it in zone B."
-    episode_length_s: 20
+    episode_length_s: 45
     warmup_time_s: 10
     reset_time_s: 15
     long_reset_interval: 10
