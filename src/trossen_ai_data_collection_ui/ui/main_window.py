@@ -14,7 +14,14 @@ from typing import (
 )
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QAction, QImage, QKeySequence, QShortcut, QTextCursor
+from PySide6.QtGui import (
+    QAction,
+    QImage,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -22,6 +29,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -628,6 +636,27 @@ class MainWindow(QMainWindow):
         # Connect reset buttons.
         self.ui.pushButton_resetarms.clicked.connect(self.start_reset_arms)
         self.ui.pushButton_resetcameras.clicked.connect(self.hardware_reset_cameras)
+
+        # Checking the framing is the first thing to do on opening the UI and the last thing
+        # anyone remembers, so it gets a button next to the other hardware ones rather than
+        # living only on a shortcut. Added here instead of in the generated resources/app.py,
+        # which is regenerated from the .ui file and would lose it.
+        self.pushButton_checkframing = QPushButton("Check Camera Framing", self)
+        self.pushButton_checkframing.setFont(self.ui.pushButton_resetcameras.font())
+        self.pushButton_checkframing.setSizePolicy(
+            self.ui.pushButton_resetcameras.sizePolicy()
+        )
+        self.pushButton_checkframing.setToolTip(
+            "Compare the camera against the frame the policy's crop was measured on, and show "
+            "the crop over the current view (C)"
+        )
+        self.pushButton_checkframing.clicked.connect(lambda: self.check_camera_framing())
+        layout = self.ui.pushButton_resetcameras.parentWidget().layout()
+        target = self.ui.horizontalLayout_6 if hasattr(self.ui, "horizontalLayout_6") else layout
+        if target is not None:
+            target.addWidget(self.pushButton_checkframing)
+        else:                                    # no layout to attach to; the shortcut still works
+            logger.warning("could not place the Check Camera Framing button; use C instead")
 
         # Enable re-recording, dry run and stop buttons.
         self.ui.pushButton_rerecord.setEnabled(True)
@@ -1808,6 +1837,56 @@ class MainWindow(QMainWindow):
                           f"{STAGING_SHEET}", clear=False)
             self.show_staging()
 
+    def _grab_main_camera_frame(self) -> "np.ndarray | None":
+        """One RGB frame from the main camera, without a recording session running.
+
+        The live feed only exists while a worker is streaming, so the check would otherwise be
+        unavailable at exactly the moment it is most useful -- before anything has been
+        recorded. Opens the camera by the serial in the robot config, takes a few frames and
+        closes again, so it never holds the device the recorder is about to want.
+        """
+        robot_model = None
+        task_config = self.get_task_parameters(self.selected_task) if self.selected_task else None
+        if task_config:
+            robot_model = task_config.get("robot_model")
+        robots = load_config(TROSSEN_AI_ROBOT_PATH_PERSISTENT) or {}
+        cfg = robots.get(robot_model) if robot_model else None
+        if cfg is None:
+            # No task chosen yet: any robot entry that has the camera will do, since the serial
+            # is what identifies it.
+            cfg = next((v for v in robots.values()
+                        if isinstance(v, dict) and FRAMING_CAMERA in (v.get("cameras") or {})),
+                       None)
+        cam = ((cfg or {}).get("cameras") or {}).get(FRAMING_CAMERA)
+        if not cam or not cam.get("serial_number"):
+            logger.warning(f"no serial number for '{FRAMING_CAMERA}' in the robot config")
+            return None
+
+        pipeline = rs.pipeline()
+        rs_cfg = rs.config()
+        rs_cfg.enable_device(str(cam["serial_number"]))
+        rs_cfg.enable_stream(
+            rs.stream.color, int(cam.get("width", 640)), int(cam.get("height", 480)),
+            rs.format.rgb8, int(cam.get("fps", 30)),
+        )
+        try:
+            pipeline.start(rs_cfg)
+            frame = None
+            for _ in range(8):                      # let auto-exposure settle
+                fs = pipeline.wait_for_frames(2000)
+                c = fs.get_color_frame()
+                if c:
+                    frame = np.asanyarray(c.get_data())
+            return None if frame is None else frame.copy()
+        except Exception as e:
+            logger.error(f"could not open '{FRAMING_CAMERA}' (serial {cam['serial_number']}): {e}")
+            return None
+        finally:
+            try:
+                pipeline.stop()
+            except Exception:
+                pass
+
     def check_camera_framing(self, quiet: bool = False) -> bool:
         """Compare the live main camera against the frame the policy's crop was measured on.
 
@@ -1826,19 +1905,57 @@ class MainWindow(QMainWindow):
             return True
 
         frame = self.last_main_frame
+        if frame is None and not quiet:
+            # Nothing streaming yet, which is the usual state when the UI has just opened and
+            # the most useful moment to check. Take a frame directly.
+            self.set_logs(f"Opening {FRAMING_CAMERA} to check the framing...", clear=False)
+            QApplication.processEvents()
+            frame = self._grab_main_camera_frame()
         if frame is None:
-            msg = "No camera frame yet -- start a dry run or recording so the feed is live."
+            msg = (
+                f"No frame from {FRAMING_CAMERA}. Start a dry run, or check that the camera is "
+                f"connected and its serial number is right in the robot configuration."
+            )
             logger.warning(msg)
             if not quiet:
                 self.set_logs(msg, clear=False)
+                QMessageBox.warning(self, "Camera framing", msg)
             return True
 
         ok, msg = framing_utils.check(self.framing, frame)
         logger.info(f"camera framing: {msg}")
         self.set_logs(msg, clear=False)
-        if not ok and not quiet:
-            QMessageBox.warning(self, "Camera framing", msg)
+        if not quiet:
+            # Show the frame that was judged, with the crop on it: the number says whether the
+            # camera moved, the picture says whether the objects are inside the window, and
+            # only the second one is checkable while staging a scene.
+            self._show_framing_preview(frame, ok, msg)
         return ok
+
+    def _show_framing_preview(self, rgb, ok: bool, msg: str) -> None:
+        """The judged frame with the crop drawn, in a dialog."""
+        vis = framing_utils.draw_crop(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), self.framing.crop)
+        vis = np.ascontiguousarray(vis)          # QImage wraps the buffer, it does not copy
+        h, w = vis.shape[:2]
+        img = QImage(vis.data, w, h, 3 * w, QImage.Format_BGR888).copy()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Camera framing")
+        layout = QVBoxLayout(dialog)
+        head = QLabel(msg, dialog)
+        head.setStyleSheet(f"color: {'#2e7d32' if ok else '#c62828'}; font-weight: bold;")
+        layout.addWidget(head)
+        pic = QLabel(dialog)
+        pic.setPixmap(QPixmap.fromImage(img).scaled(760, 570, Qt.KeepAspectRatio,
+                                                    Qt.SmoothTransformation))
+        layout.addWidget(pic)
+        layout.addWidget(QLabel(
+            "Orange box: what the policy sees. Anything staged outside it is invisible to the "
+            "policy, however clean the demonstration.", dialog))
+        close = QPushButton("Close", dialog)
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
+        dialog.exec()
 
     def show_staging(self) -> None:
         """Put the current staging row in the log, where the operator is already looking."""
