@@ -2165,6 +2165,12 @@ class MainWindow(QMainWindow):
         left.addWidget(self.gate_status)
         left.addStretch(1)
 
+        live = QLabel("The arm is following the leader while this is open. "
+                      "Enter opens the gripper and stops.", dialog)
+        live.setStyleSheet("color: #ef6c00;")
+        live.setWordWrap(True)
+        left.addWidget(live)
+
         start = QPushButton("Setup done -- start recording  (G)", dialog)
         start.setStyleSheet("font-weight: bold; padding: 8px;")
         start.setDefault(True)
@@ -2548,41 +2554,62 @@ class MainWindow(QMainWindow):
         Runs on the worker thread; the flags are set from the UI thread, which is why this
         polls a flag rather than touching Qt.
 
-        It also keeps the cameras running while it waits. Frames otherwise only come from the
-        control loop, which is not running yet -- so the feed and the setup gate both froze on
-        whatever was in front of the camera when the previous episode ended, and a gate that
-        checks the scene against a stale frame is worse than one that checks nothing: it
-        reports the last episode's layout as if it were this one's.
+        It also teleoperates while it waits, at the recording rate. Frames otherwise only come
+        from the control loop, which is not running yet -- so the feed and the setup gate both
+        froze on whatever was in front of the camera when the previous episode ended, and a
+        gate that checks the scene against a stale frame is worse than one that checks nothing,
+        because it reports the last episode's layout as if it were this one's.
 
-        Observations only, never teleop_step: nothing here should move the arm.
+        Teleoperating rather than only reading the cameras is what makes the start pose part of
+        the staging: the sheet asks for a different nudge off the home pose every episode, and
+        an arm that cannot be moved until recording has already begun cannot be placed before
+        it. It runs at cfg.fps for the same reason the control loop does -- a follower stepped
+        at 10 Hz lurches between leader positions instead of tracking them.
+
+        The arm being live here is why Enter has to do more than break the loop: it opens the
+        gripper first, exactly as the control loop does.
         """
         self.events["start_episode"] = False
+        # Say that the follower is live before it moves. It starts tracking the leader the
+        # moment this gate opens, which is earlier than it used to -- and if the leader was
+        # left somewhere far from the follower, the first step closes that gap at once.
         self.log_signal.emit(
-            colored("position the arm and the props, then press G to record "
-                    "(Enter = emergency release)", "cyan"), False)
+            colored("TELEOPERATION LIVE -- the arm now follows the leader. Position the arm "
+                    "and the props, then press G to record (Enter = open the gripper and "
+                    "stop)", "cyan"), False)
         # Queued to the UI thread, which owns the widgets. The gate sets the same flag G does,
         # so this loop needs no other change and G keeps working with the dialog closed.
         self.setup_gate_signal.emit()
 
-        keys, last, warned = None, 0.0, False
+        fps = float(getattr(cfg, "fps", 30) or 30)
+        keys, last_emit, warned = None, 0.0, False
         while not self.events["start_episode"]:
-            if self.events["stop_recording"] or self.events.get("emergency"):
+            step_t = time.perf_counter()
+            if self.events.get("emergency"):
+                # The arm is following the leader by now, so breaking out is not enough.
+                if robot is not None:
+                    self._emergency_release(robot)
                 return True
-            now = time.perf_counter()
-            if robot is not None and now - last >= 0.1:   # 10 Hz is plenty for staging
-                last = now
+            if self.events["stop_recording"]:
+                return True
+            if robot is not None:
                 try:
-                    obs = robot.capture_observation()
+                    observation, _ = robot.teleop_step(record_data=True)
                     if keys is None:
-                        keys = [k for k in obs if "image" in k]
+                        keys = [k for k in observation if "image" in k]
                         self.worker.camera_labels_update.emit(keys[:4])
-                    for i, k in enumerate(keys[:4]):
-                        self.worker.image_update.emit(i, obs[k].numpy())
+                    # Teleoperate at fps, redraw at 10 Hz. The follower needs every step; the
+                    # operator staging a scene does not need thirty pictures a second, and the
+                    # gate re-runs its scene check on each one.
+                    if step_t - last_emit >= 0.1:
+                        last_emit = step_t
+                        for i, k in enumerate(keys[:4]):
+                            self.worker.image_update.emit(i, observation[k].numpy())
                 except Exception:
-                    if not warned:                        # once, not ten times a second
+                    if not warned:                        # once, not thirty times a second
                         warned = True
-                        logger.exception("could not read the cameras while waiting to start")
-            time.sleep(0.02)
+                        logger.exception("teleoperation failed while waiting to start")
+            busy_wait(max(0.0, 1 / fps - (time.perf_counter() - step_t)))
         self.events["start_episode"] = False
         return False
 
