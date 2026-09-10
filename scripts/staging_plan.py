@@ -29,16 +29,24 @@ from pathlib import Path
 
 import yaml
 
-COLS = "ABCDE"          # left to right across the mat
-ROWS = [1, 2, 3]        # near to far
+ZONES = ["L", "C", "R"]          # left / centre / right, across the arm's reachable band
+
+# The six routes an object can take. Two are withheld from training so that "does it generalize"
+# can be measured instead of guessed: every zone is still demonstrated in both roles, and only
+# the PAIRING is new at evaluation. See docs/ood_collection_protocol.md.
+HELD_OUT_ROUTES = {("L", "R"), ("R", "L")}
+
+TRAIN_LIGHTING = ["A: overheads on", "B: overheads off + lamp"]
+EVAL_LIGHTING = "C: blinds open, overheads off"
+
+NUDGES = ["none", "shoulder +5deg", "shoulder -5deg", "elbow +5deg", "wrist +10deg"]
 
 
-def cells() -> list[str]:
-    return [f"{c}{r}" for c in COLS for r in ROWS]
-
-
-def adjacent(a: str, b: str) -> bool:
-    return abs(COLS.index(a[0]) - COLS.index(b[0])) <= 1 and abs(int(a[1]) - int(b[1])) <= 1
+def routes(split: str) -> list[tuple[str, str]]:
+    all_routes = [(o, c) for o in ZONES for c in ZONES if o != c]
+    if split == "eval":
+        return [r for r in all_routes if r in HELD_OUT_ROUTES]
+    return [r for r in all_routes if r not in HELD_OUT_ROUTES]
 
 
 def load_task(cfg: Path, name: str) -> dict:
@@ -53,64 +61,75 @@ def load_task(cfg: Path, name: str) -> dict:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--task", required=True)
-    p.add_argument("--episodes", type=int, default=30, help="per object variant")
+    p.add_argument("--episodes", type=int, default=10, help="per object per route")
+    p.add_argument("--split", choices=["train", "eval"], default="train")
     p.add_argument("--config", type=Path,
                    default=Path(__file__).resolve().parents[1]
                    / "src/trossen_ai_data_collection_ui/configs/tasks.yaml")
-    p.add_argument("--lighting", nargs="+",
-                   default=["overheads on", "overheads off + lamp", "blinds open"],
-                   help="conditions to rotate through; one lighting condition is what made the "
-                        "policy fail in a dimmer room")
+    p.add_argument("--hold-out-object", default=None,
+                   help="record everything except this one, so the instruction has to ground a "
+                        "word seen only in other contexts (e.g. banana)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--csv", type=Path, default=None)
     a = p.parse_args()
 
     task = load_task(a.config, a.task)
-    variants = task["task_objects"]
+    variants = [v for v in task["task_objects"]
+                if not (a.hold_out_object and a.hold_out_object.lower() in v.lower())]
+    if a.split == "eval" and a.hold_out_object:
+        variants = task["task_objects"]        # the held-out object belongs in the eval set
     rng = random.Random(a.seed)
-    grid = cells()
+    rs = routes(a.split)
 
     rows = []
     for v in variants:
-        for i in range(a.episodes):
-            while True:
-                obj, con = rng.choice(grid), rng.choice(grid)
-                if obj != con and not adjacent(obj, con):
-                    break
-            rows.append({
-                "variant": v if len(v) < 30 else v[:27] + "...",
-                "episode": i + 1,
-                "object_cell": obj,
-                "container_cell": con,
-                "lighting": a.lighting[(len(rows)) % len(a.lighting)],
-                "start_nudge": rng.choice(["none", "shoulder +5deg", "shoulder -5deg",
-                                           "elbow +5deg", "wrist +10deg"]),
-            })
+        for obj, con in rs:
+            for i in range(a.episodes):
+                rows.append({
+                    "variant": v if len(v) < 30 else v[:27] + "...",
+                    "episode": len(rows) + 1,
+                    "object_zone": obj,
+                    "container_zone": con,
+                    "route": f"{obj}->{con}",
+                    "lighting": (EVAL_LIGHTING if a.split == "eval"
+                                 else TRAIN_LIGHTING[len(rows) % len(TRAIN_LIGHTING)]),
+                    "start_nudge": rng.choice(NUDGES),
+                })
+    rng.shuffle(rows)
+    for i, r in enumerate(rows, 1):
+        r["episode"] = i
 
-    # Did the container end up correlated with the variant after all? Say so rather than
-    # assuming: that correlation is the exact defect this sheet exists to prevent.
+    print(f"\n{a.task} [{a.split}]: {len(variants)} objects x {len(rs)} routes x "
+          f"{a.episodes} = {len(rows)} episodes")
+    print(f"routes {a.split}: {', '.join(f'{o}->{c}' for o, c in rs)}")
+    if a.split == "train":
+        print(f"held out for evaluation: "
+              f"{', '.join(f'{o}->{c}' for o, c in sorted(HELD_OUT_ROUTES))}"
+              + (f", and the {a.hold_out_object}" if a.hold_out_object else ""))
+    print(f"zones: L / C / R across the mat, boundaries at -0.22 and +0.22 rad shoulder\n")
+
+    hdr = (f"{'variant':<30} {'ep':>4} {'object':>7} {'container':>10} {'route':>7}  "
+           f"{'lighting':<24} start")
+    print(hdr); print("-" * len(hdr))
+    for r in rows[:20]:
+        print(f"{r['variant']:<30} {r['episode']:>4} {r['object_zone']:>7} "
+              f"{r['container_zone']:>10} {r['route']:>7}  {r['lighting']:<24} {r['start_nudge']}")
+    if len(rows) > 20:
+        print(f"... {len(rows) - 20} more (use --csv for the whole sheet)")
+
+    # The defect that broke the last round: the container's position being a hint about which
+    # object was named. Check it rather than trusting the shuffle.
     by_variant = {}
     for r in rows:
-        by_variant.setdefault(r["variant"], []).append(COLS.index(r["container_cell"][0]))
+        by_variant.setdefault(r["variant"], []).append(ZONES.index(r["container_zone"]))
     means = {k: sum(v) / len(v) for k, v in by_variant.items()}
-    spread = max(means.values()) - min(means.values())
-
-    print(f"\n{a.task}: {len(variants)} variants x {a.episodes} episodes = {len(rows)} takes")
-    print(f"mat grid: columns {COLS[0]}-{COLS[-1]} left to right, rows {ROWS[0]}-{ROWS[-1]} "
-          f"near to far\n")
-    hdr = f"{'variant':<30} {'ep':>3} {'object':>7} {'container':>10} {'lighting':<22} {'start'}"
-    print(hdr); print("-" * len(hdr))
-    for r in rows[: min(len(rows), 24)]:
-        print(f"{r['variant']:<30} {r['episode']:>3} {r['object_cell']:>7} "
-              f"{r['container_cell']:>10} {r['lighting']:<22} {r['start_nudge']}")
-    if len(rows) > 24:
-        print(f"... {len(rows) - 24} more (use --csv to write the whole sheet)")
-
-    print(f"\ncontainer column mean per variant: "
-          + ", ".join(f"{k.split()[-1]}={v:.1f}" for k, v in means.items()))
-    print(f"spread across variants: {spread:.2f} columns "
-          + ("(good: the container is not a hint about the object)" if spread < 1.0
-             else "(TOO HIGH -- re-run with another --seed; the container is leaking the task)"))
+    spread = max(means.values()) - min(means.values()) if len(means) > 1 else 0.0
+    # task_objects are the variant strings themselves ("orange"), not full sentences
+    print(f"\ncontainer zone mean per object: "
+          + ", ".join(f"{k}={v:.2f}" for k, v in means.items()))
+    print(f"spread across objects: {spread:.2f} zones "
+          + ("(good: the container is not a hint about the object)" if spread < 0.35
+             else "(TOO HIGH -- re-run with another --seed)"))
 
     if a.csv:
         with open(a.csv, "w", newline="") as fh:

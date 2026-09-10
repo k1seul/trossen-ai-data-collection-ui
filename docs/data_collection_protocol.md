@@ -96,6 +96,11 @@ This matters more than anything else for a policy that generalizes:
   warmup phase settle into it) — vary the object, not the robot's starting
   configuration.
 
+> For the `pick_place_fruit_bowl` re-collection, follow
+> [ood_collection_protocol.md](ood_collection_protocol.md) instead of this section: it withholds
+> two of the six object→container routes, one lighting condition and one fruit, so that
+> generalization can be measured rather than assumed.
+
 ### Use the staging sheet
 
 ```bash
