@@ -522,6 +522,66 @@ def draw_zones(bgr: np.ndarray, crop: "tuple[int, int, int] | None",
     return bgr
 
 
+def lighting_signature(rgb: np.ndarray, crop: "tuple[int,int,int] | None",
+                       skip_top: int = 0) -> dict:
+    """What the mat looks like under the light currently on.
+
+    Brightness alone does not separate these conditions -- an overhead-lit mat measured V 150
+    and one with the sub lamp added V 157, which any change of exposure covers. A directional
+    lamp shows up in colour and in how evenly it lights the mat, so those go in too.
+    """
+    h, w = rgb.shape[:2]
+    if crop:
+        x, y, side = crop
+        x0, x1 = max(0, x), min(w, x + side)
+        y0, y1 = max(skip_top, y), min(h, y + side)
+    else:
+        x0, x1, y0, y1 = 0, w, skip_top, h
+    patch = rgb[y0:y1, x0:x1].astype(np.float32)
+    R, G, B = patch[:, :, 0].mean(), patch[:, :, 1].mean(), patch[:, :, 2].mean()
+    v = cv2.cvtColor(patch.astype(np.uint8), cv2.COLOR_RGB2HSV)[:, :, 2].astype(np.float32)
+    med = float(np.median(v)) or 1.0
+    return {"v_median": med,
+            "r_over_b": float(R / max(B, 1e-6)),
+            "g_over_b": float(G / max(B, 1e-6)),
+            "evenness": float(np.percentile(v, 95) / med),
+            "v_spread": float(v.std() / med)}
+
+
+# Each feature divided by how much it is allowed to wander before it means something. Set from
+# the same scene photographed twice under one condition: anything smaller than this is the
+# camera's own variation, not the light.
+LIGHT_SCALE = {"v_median": 6.0, "r_over_b": 0.010, "g_over_b": 0.010,
+               "evenness": 0.030, "v_spread": 0.030}
+
+
+def lighting_distance(a: dict, b: dict) -> float:
+    """How far apart two signatures are, in units of "enough to notice"."""
+    return float(np.sqrt(sum(((a[k] - b[k]) / s) ** 2 for k, s in LIGHT_SCALE.items())))
+
+
+def classify_lighting(sig: dict, profiles: dict) -> "tuple[str | None, float, str]":
+    """Which stored condition this looks like, and whether the answer means anything.
+
+    Returns (name, margin, message). A margin near 1 means the two conditions are as far apart
+    as the noise -- in which case the honest answer is that the camera cannot tell, and a
+    lighting axis nobody can verify is one that gets recorded wrong and analysed anyway.
+    """
+    if len(profiles) < 2:
+        return None, 0.0, "fewer than two lighting conditions have been recorded"
+    d = sorted(((lighting_distance(sig, p), n) for n, p in profiles.items()))
+    best, second = d[0], d[1]
+    margin = second[0] / max(best[0], 1e-6)
+    if second[0] < 2.0:
+        return None, margin, (f"cannot tell {best[1]} from {second[1]}: they differ by "
+                              f"{second[0] - best[0]:.1f}, which is inside the camera's own "
+                              f"variation. This lighting axis is not measurable here.")
+    if margin < 1.6:
+        return best[1], margin, (f"probably {best[1]}, but {second[1]} is nearly as close "
+                                 f"(margin {margin:.1f}x) -- treat it as unknown")
+    return best[1], margin, f"{best[1]}"
+
+
 def selftest() -> None:
     """Shift a frame by a known amount and check the wording, not only the magnitude."""
     g = np.zeros((480, 640), np.uint8)

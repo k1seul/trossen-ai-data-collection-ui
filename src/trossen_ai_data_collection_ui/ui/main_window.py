@@ -82,6 +82,7 @@ from trossen_ai_data_collection_ui.utils.constants import (
     FRAMING_CAMERA,
     FRAMING_REFERENCE,
     FRAMING_WORKSPACE,
+    LIGHTING_PROFILE,
     NUDGE_JOINTS,
     NUDGE_TOL_DEG,
     SESSION_LOG,
@@ -299,6 +300,8 @@ class CalibrationMenu(QDialog):
         self.ui.pushButton_gotopose.clicked.connect(self.calib_gotopose)
 
     def closeEvent(self, event):
+        logger.info("window closed by the user -- a session log ending without this line "
+                    "stopped some other way")
         """
         Override the base class closeEvent with a graceful disconnect routine.
 
@@ -2427,6 +2430,16 @@ class MainWindow(QMainWindow):
             warn.setWordWrap(True)
             left.addWidget(warn)
 
+        if row is not None:
+            learn = QHBoxLayout()
+            learn.addWidget(QLabel("Learn this light as:", dialog))
+            for name in ("A: overheads only", "B: overheads + sub lamp"):
+                b = QPushButton(name.split(":")[0], dialog)
+                b.setToolTip(f"Record what the mat looks like right now as '{name}'")
+                b.clicked.connect(lambda _=False, n=name: self.learn_lighting(n))
+                learn.addWidget(b)
+            left.addLayout(learn)
+
         home = QPushButton("Arm to start pose  (H)", dialog)
         home.setToolTip("Drives the leader to the pose every episode begins from; "
                         "the follower comes with it.")
@@ -2545,6 +2558,34 @@ class MainWindow(QMainWindow):
             msg += f"  --  also off home: {', '.join(others)}"
         return ok, msg
 
+    def _lighting_profiles(self) -> dict:
+        try:
+            return json.loads(LIGHTING_PROFILE.read_text()) if LIGHTING_PROFILE.exists() else {}
+        except Exception:
+            logger.exception("could not read the lighting profiles")
+            return {}
+
+    def learn_lighting(self, name: str) -> None:
+        """Record what the mat looks like under the condition currently switched on."""
+        frame = getattr(self, "last_main_frame", None)
+        if frame is None or self.framing is None:
+            self.set_logs("No frame yet -- cannot learn the lighting.", clear=False)
+            return
+        prof = self._lighting_profiles()
+        prof[name] = framing_utils.lighting_signature(frame, self.framing.crop,
+                                                      self.framing.table_top)
+        LIGHTING_PROFILE.parent.mkdir(parents=True, exist_ok=True)
+        LIGHTING_PROFILE.write_text(json.dumps(prof, indent=2, ensure_ascii=False))
+        msg = f"learned '{name}'"
+        if len(prof) >= 2:
+            names = list(prof)
+            d = min(framing_utils.lighting_distance(prof[a], prof[b])
+                    for i, a in enumerate(names) for b in names[i + 1:])
+            msg += (f"; closest pair differs by {d:.1f}"
+                    + ("" if d >= 2.0 else " -- too close for the camera to tell apart"))
+        logger.info(msg)
+        self.set_logs(msg, clear=False)
+
     def _refresh_setup_gate(self) -> None:
         """Live camera in the gate: the crop, and anything that has fallen outside it."""
         if self.framing is None:
@@ -2604,7 +2645,23 @@ class MainWindow(QMainWindow):
         # From framing, not a copy: the copy is what drifted.
         icon = framing_utils.STATUS_LABELS
         body = "\n".join(f"{icon.get(s, s[:5].upper())}  {line}" for s, line in lines)
-        body = ("[OK] " if pose_ok else "[--] ") + pose_msg + "\n" + body
+        # Which light is actually on, against what the row asked for. It is the one condition
+        # nobody can see they have forgotten: the props are visible either way.
+        want = (row.get("lighting") or "").strip()
+        prof = self._lighting_profiles()
+        if prof:
+            sig = framing_utils.lighting_signature(frame, crop, self.framing.table_top)
+            got, _margin, why = framing_utils.classify_lighting(sig, prof)
+            light_ok = got is not None and got == want
+            light_msg = (f"lighting: {why}" if got != want or got is None
+                         else f"lighting: {got}")
+            if got is not None and want and got != want:
+                light_msg = f"lighting: looks like {got}, the row asks for {want}"
+        else:
+            light_ok, light_msg = True, ("lighting: not learned yet -- press the buttons below "
+                                         "once under each condition")
+        body = (("[OK] " if light_ok else "[--] ") + light_msg + "\n"
+                + ("[OK] " if pose_ok else "[--] ") + pose_msg + "\n" + body)
         if ok and pose_ok:
             self.gate_status.setText("Scene and start pose match the staging row.\n" + body)
             self.gate_status.setStyleSheet("color: #2e7d32; font-family: monospace;")

@@ -95,3 +95,8 @@ NUDGE_JOINTS = {"base": 0, "shoulder": 1, "elbow": 2, "forearm": 3, "wrist": 4, 
 # How close counts as "at the nudge". The sheet asks for 5 or 10 degrees, and the point is a
 # start pose that varies rather than one hit precisely, so this is generous on purpose.
 NUDGE_TOL_DEG = 1.5
+
+# One signature of the mat per lighting condition, learned from the live camera. The conditions
+# this room can produce are close enough together that whether they are distinguishable at all
+# is a measurement, not an assumption -- see framing.classify_lighting.
+LIGHTING_PROFILE = FRAMING_ROOT / "lighting.json"
