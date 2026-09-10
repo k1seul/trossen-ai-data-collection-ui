@@ -79,6 +79,42 @@ tasks:
     save_interval: 1
 
   # ===========================================================================
+  # Re-collection for the OOD experiment (see docs/ood_collection_protocol.md).
+  #
+  # Both containers are on the mat and the sentence names one, so "bowl" and "pot" have to be
+  # read rather than inferred -- with a single container present the word carries nothing, the
+  # way the colour did when only one block was out. It also varies the release: the pot's walls
+  # are higher than the bowl's, so "over the container" cannot be one memorised pose.
+  #
+  # Distractor blocks, container zones and lighting come from scripts/staging_plan.py, which
+  # the UI reads and shows per episode.
+  # ===========================================================================
+  - task_name: "block_to_named_container"
+    robot_model: "trossen_ai_solo"
+    task_description: "{object}"
+    task_objects:
+      - "Pick up the red block and place it in the bowl."
+      - "Pick up the red block and place it in the pot."
+      - "Pick up the blue block and place it in the bowl."
+      - "Pick up the blue block and place it in the pot."
+      - "Pick up the green block and place it in the bowl."
+      - "Pick up the green block and place it in the pot."
+      - "Pick up the yellow block and place it in the bowl."
+      - "Pick up the yellow block and place it in the pot."
+    episode_length_s: 45
+    warmup_time_s: 5
+    reset_time_s: 20
+    long_reset_interval: 10
+    long_reset_time_s: 60
+    hf_user: "k1seul"
+    fps: 30
+    display_fps: 30
+    push_to_hub: true
+    play_sounds: true
+    disable_active_ui_updates: false
+    save_interval: 1
+
+  # ===========================================================================
   # Difficulty Tier 4 (medium): stacking colored tape rolls -- precise
   # alignment plus a gentle, controlled release so the stack doesn't topple.
   # Both the picked and base tape colors are named explicitly in each

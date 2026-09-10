@@ -44,6 +44,18 @@ LIGHTING = ["A: overheads on", "B: overheads off + lamp", "C: blinds open, overh
 NUDGES = ["none", "shoulder +5deg", "shoulder -5deg", "elbow +5deg", "wrist +10deg"]
 
 
+def short(v: str) -> str:
+    """A sentence variant is a whole instruction; label it by what actually varies.
+
+    "Pick up the red block and place it in the pot." -> "red -> pot"
+    """
+    if " in the " not in v:
+        return v
+    head, tail = v.rsplit(" in the ", 1)
+    colour = head.replace("Pick up the ", "").split(" block")[0].strip()
+    return f"{colour} -> {tail.strip('. ')}"
+
+
 def routes() -> list[tuple[str, str]]:
     return [(o, c) for o in ZONES for c in ZONES if o != c]
 
@@ -88,7 +100,18 @@ def main() -> None:
     for v in variants:
         for obj, con in rs:
             for k in range(a.episodes):
-                others = [o for o in variants if o != v]
+                # Exclude by the COLOUR, not the whole sentence: with the container named in
+                # the instruction, "red -> bowl" and "red -> pot" are different variants but
+                # the same physical block, so comparing sentences would put the target on the
+                # mat twice and make the instruction ambiguous.
+                me = short(v).split(" ->")[0]
+                others = [o for o in variants if short(o).split(" ->")[0] != me]
+                seen, uniq = set(), []
+                for o in others:                       # one block per colour, not per sentence
+                    c = short(o).split(" ->")[0]
+                    if c not in seen:
+                        seen.add(c); uniq.append(o)
+                others = uniq
                 rng.shuffle(others)
                 picked = others[: a.distractors]
                 # The distractors occupy zones too, so which zone is occupied cannot give away
@@ -96,15 +119,27 @@ def main() -> None:
                 free = [z for z in ZONES if z != con]
                 dz = [free[i % len(free)] for i in range(len(picked))]
                 rng.shuffle(dz)
+                # A task whose sentence names the container has the OTHER container on the mat
+                # too, and it needs a zone -- otherwise the named one is the only place to put
+                # anything and the word carries nothing, the way the colour did when a single
+                # block was out.
+                other_con = "(none)"
+                if " in the " in v:
+                    named = v.rsplit(" in the ", 1)[1].strip(". ")
+                    alt = "pot" if named == "bowl" else "bowl"
+                    free_c = [z for z in ZONES if z not in (con, obj)] or \
+                             [z for z in ZONES if z != con]
+                    other_con = f"{alt}@{rng.choice(free_c)}"
                 rows.append({"variant": v, "object_zone": obj, "container_zone": con,
-                             "route": f"{obj}->{con}",
-                             "distractors": "; ".join(f"{o.split()[0]}@{z}"
-                                                      for o, z in zip(picked, dz)) or "(none)",
+                             "route": f"{obj}->{con}", "other_container": other_con,
+                             "distractors": "; ".join(
+                                 f"{short(o).split(' ->')[0]}@{z}" for o, z in zip(picked, dz))
+                                 or "(none)",
                              "lighting": a.lighting[k % len(a.lighting)],
                              "start_nudge": rng.choice(NUDGES)})
     rng.shuffle(rows)                      # order of recording only; the design is already set
     order = ["variant", "episode", "object_zone", "container_zone", "route",
-             "distractors", "lighting", "start_nudge"]
+             "other_container", "distractors", "lighting", "start_nudge"]
     for i, r in enumerate(rows, 1):
         r["episode"] = i
     rows = [{k: r[k] for k in order} for r in rows]
@@ -115,13 +150,13 @@ def main() -> None:
           f"later, on the data)")
     print(f"zones: L / C / R across the mat, boundaries at -0.22 and +0.22 rad shoulder\n")
 
-    hdr = (f"{'target':<13} {'ep':>4} {'obj':>4} {'bowl':>5} {'route':>7}  "
-           f"{'also on the mat':<22} {'lighting':<28} start")
+    hdr = (f"{'target':<16} {'ep':>4} {'obj':>4} {'dest':>5} {'route':>7}  "
+           f"{'other cont.':<11} {'also on the mat':<24} {'lighting':<28} start")
     print(hdr); print("-" * len(hdr))
     for r in rows[:16]:
-        print(f"{r['variant']:<13} {r['episode']:>4} {r['object_zone']:>4} "
-              f"{r['container_zone']:>5} {r['route']:>7}  {r['distractors']:<22} "
-              f"{r['lighting']:<28} {r['start_nudge']}")
+        print(f"{short(r['variant']):<16} {r['episode']:>4} {r['object_zone']:>4} "
+              f"{r['container_zone']:>5} {r['route']:>7}  {r['other_container']:<11} "
+              f"{r['distractors']:<24} {r['lighting']:<28} {r['start_nudge']}")
     if len(rows) > 16:
         print(f"... {len(rows) - 16} more (use --csv for the whole sheet)")
 
@@ -144,7 +179,8 @@ def main() -> None:
 def _report_balance(rows, field, against, levels, why):
     groups = {}
     for r in rows:
-        groups.setdefault(r[against], []).append(levels.index(r[field]))
+        key = short(r[against]) if against == "variant" else r[against]
+        groups.setdefault(key, []).append(levels.index(r[field]))
     means = {k: sum(v) / len(v) for k, v in groups.items()}
     spread = (max(means.values()) - min(means.values())) if len(means) > 1 else 0.0
     ok = spread < 0.35
