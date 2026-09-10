@@ -33,6 +33,12 @@ TROSSEN_AI_CALIBRATION_CONFIG_PATH_PERSISTENT = PERSISTENT_CONFIGS_ROOT / "calib
 # Directory for the data collection plan/progress tracking files
 DATA_COLLECTION_PLAN_ROOT = Path.home() / ".trossen" / "trossen_ai_data_collection" / "plan"
 
+# Per-episode staging produced by scripts/staging_plan.py: which zone the target and the
+# container go in, which blocks are also on the mat, the lighting and the start-pose nudge.
+# Randomising these is what the previous round did not do for the container, which taught the
+# policy that each task had a fixed place to carry things to.
+STAGING_SHEET = DATA_COLLECTION_PLAN_ROOT / "staging_sheet.csv"
+
 # Path to the data collection plan CSV (target vs. recorded episodes per task/object).
 # Auto-seeded from tasks.yaml and auto-updated as episodes are recorded; target_episodes
 # is left for the user to fill in and is never overwritten automatically.

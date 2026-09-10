@@ -63,6 +63,7 @@ from trossen_ai_data_collection_ui.utils.constants import (
     DATA_COLLECTION_PLAN_CSV_PATH,
     DATA_COLLECTION_PLAN_MD_PATH,
     PACKAGE_ROOT,
+    STAGING_SHEET,
     TROSSEN_AI_CALIBRATION_CONFIG_PATH_PERSISTENT,
     TROSSEN_AI_ROBOT_PATH_PERSISTENT,
     TROSSEN_AI_TASK_PATH_PERSISTENT,
@@ -572,11 +573,22 @@ class MainWindow(QMainWindow):
         #   Space / S  finish the episode now and KEEP it   (the object is placed)
         #   F          discard this take and move on        (spoiled: knocked off the mat)
         #   R          stop waiting out the reset           (scene is re-staged)
+        # Per-episode staging, if scripts/staging_plan.py has written a sheet. Randomising the
+        # container's position is the change that matters most this round -- the previous one
+        # left it fixed, and the policy learned each task's container position as part of the
+        # task rather than as something to look for. A sheet nobody reads changes nothing, so
+        # the row is shown here, in the log, and advances when an episode is kept.
+        self.staging_rows: list[dict] = []
+        self.staging_idx = 0
+        self._load_staging_sheet()
+
         self.episode_shortcuts = []
         for keys, slot in (
             (("Space", "S"), self.set_finish_episode),
             (("F",), self.set_fail_episode),
             (("R",), self.set_skip_reset),
+            (("N",), self.show_staging),          # re-show the current staging row
+            (("Ctrl+N",), self._load_staging_sheet),   # re-read the sheet from disk
         ):
             for k in keys:
                 sc = QShortcut(QKeySequence(k), self)
@@ -1019,6 +1031,7 @@ class MainWindow(QMainWindow):
         (or ends the session if this was the last episode).
         """
         logger.info("Finish episode triggered by user")
+        self.advance_staging()
         self.set_logs("Finish episode triggered: saving episode and moving to the next one")
         self.events["finish_episode"] = True
         self.events["exit_early"] = True
@@ -1708,6 +1721,46 @@ class MainWindow(QMainWindow):
         Refresh the on-screen preview of the instruction that will be recorded next.
         """
         self.ui.label_instruction_preview.setText(f"Instruction: {self.get_current_instruction()}")
+
+    def _load_staging_sheet(self) -> None:
+        """Read the staging sheet, if there is one. Absent is fine -- this is optional."""
+        import csv
+        self.staging_rows, self.staging_idx = [], 0
+        try:
+            if STAGING_SHEET.exists():
+                with open(STAGING_SHEET, newline="") as fh:
+                    self.staging_rows = list(csv.DictReader(fh))
+        except Exception:
+            logger.exception("could not read the staging sheet at %s", STAGING_SHEET)
+            return
+        if self.staging_rows:
+            self.set_logs(f"staging sheet: {len(self.staging_rows)} episodes from "
+                          f"{STAGING_SHEET}", clear=False)
+            self.show_staging()
+
+    def show_staging(self) -> None:
+        """Put the current staging row in the log, where the operator is already looking."""
+        if not self.staging_rows:
+            return
+        if self.staging_idx >= len(self.staging_rows):
+            self.set_logs("staging sheet finished -- every cell has been recorded", clear=False)
+            return
+        r = self.staging_rows[self.staging_idx]
+        self.set_logs(
+            f"[{self.staging_idx + 1}/{len(self.staging_rows)}]  "
+            f"TARGET {r.get('variant', '?')} in zone {r.get('object_zone', '?')}  |  "
+            f"BOWL in {r.get('container_zone', '?')}  |  "
+            f"also on the mat: {r.get('distractors', '-')}  |  "
+            f"lighting {r.get('lighting', '-')}  |  start {r.get('start_nudge', '-')}",
+            clear=False)
+
+    def advance_staging(self) -> None:
+        """Move to the next row. Only a KEPT episode advances: a discarded take is re-recorded
+        with the same staging, so the cell it belongs to still gets filled."""
+        if not self.staging_rows:
+            return
+        self.staging_idx += 1
+        self.show_staging()
 
     def set_logs(self, logs: str, clear: bool = True) -> None:
         """

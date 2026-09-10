@@ -90,6 +90,23 @@ the previous round.
 
 Both checks print with the sheet; both should read 0.00.
 
+## The sheet appears in the app
+
+`scripts/staging_plan.py --csv ~/.trossen/trossen_ai_data_collection/plan/staging_sheet.csv`
+writes where the UI looks for it. The current row is then printed in the log pane:
+
+```
+[7/144]  TARGET red block in zone C  |  BOWL in L  |  also on the mat: green@R; blue@C
+         |  lighting A: overheads on  |  start shoulder -5deg
+```
+
+It advances when an episode is **kept** (`Space`). A discarded take (`F`) keeps the same row, so
+the cell it belongs to still gets filled. `N` re-shows the current row, `Ctrl+N` re-reads the
+sheet from disk.
+
+A sheet nobody reads changes nothing, which is why it is in the log rather than in a spreadsheet
+on another screen.
+
 ## Session plan
 
 ```bash
@@ -206,7 +223,14 @@ The 0.02–0.05 band should be well above 15%, not 2%.
    names. Vary position and orientation freely *within* the zone — the zone is the constraint,
    not the exact spot.
 2. Set the lighting to the condition the sheet names.
-3. Apply the start-pose nudge (a few degrees on the named joint) before starting.
+3. Apply the start-pose nudge **during the 5 s warm-up**. Teleoperation is live then but
+   nothing is recorded, so moving the leader a few degrees on the named joint leaves the
+   follower somewhere slightly different when recording begins. That is the whole mechanism —
+   no setting to change.
+
+   Every episode in the previous round started within **0.0002 rad** of the same pose, because
+   "Reset arms" homes both arms exactly and it was pressed every time. Either skip it, or press
+   it and then nudge during the warm-up.
 4. Start recording.
 5. **If the grasp misses, recover within the episode and keep it.** The previous 120 episodes
    contain not one recovery, and it is the single thing a behaviour-cloning policy most needs to
