@@ -2899,7 +2899,15 @@ class MainWindow(QMainWindow):
     ALIGN_MAX_S = 6.0
     ALIGN_TOL = 0.03            # radians; below this the arms are already together
 
-    def drive_to_start_pose(self, robot, fps: float = 30.0) -> None:
+    def release_leader(self, robot) -> None:
+        """Hand the leader back to the operator: torque off, which here is gravity compensation."""
+        try:
+            for arm in robot.leader_arms.values():
+                arm.write("Torque_Enable", 0)
+        except Exception:
+            logger.exception("could not hand the leader back")
+
+    def drive_to_start_pose(self, robot, fps: float = 30.0, hold: bool = True) -> None:
         """Take both arms to the pose every episode begins from. MOVES THE ARM.
 
         Setting a start pose by hand means holding the leader still at a particular
@@ -2912,6 +2920,13 @@ class MainWindow(QMainWindow):
         next step. Driving the leader and letting the follower track it is the same motion the
         operator would have made, done accurately. Torque goes back off at the end, which on
         this arm means gravity compensation rather than limp -- it stays where it is left.
+
+        With hold=True the leader is LEFT in position mode afterwards, holding the pose. That
+        is what keeps the arm still while a scene is being staged: gravity compensation is not
+        stillness, the leader settles under its own weight, and teleoperation walks the
+        follower down with it. Holding costs nothing now that the start pose is fixed -- there
+        is no longer a pose for the operator to set by hand -- and it frees both their hands
+        for the props. release_leader hands it back when the episode begins.
         """
         pose = list(EPISODE_START_POSE)
         seconds = 2.5
@@ -2945,65 +2960,15 @@ class MainWindow(QMainWindow):
                     pass
                 busy_wait(1 / fps)
         finally:
-            try:
-                for arm in robot.leader_arms.values():
-                    arm.write("Torque_Enable", 0)                  # back to gravity compensation
-            except Exception:
-                logger.exception("could not hand the leader back")
-        self.log_signal.emit(colored("at the start pose", "cyan"), False)
+            if not hold:
+                self.release_leader(robot)
+        self.log_signal.emit(
+            colored("at the start pose" + (" -- holding it" if hold else ""), "cyan"), False)
 
     def request_start_pose(self) -> None:
         """H, or the gate's button. The move itself happens on the thread that owns the arm."""
         self.events["go_home"] = True
         self.set_logs("Start pose requested -- the arm will move.", clear=False)
-
-    def align_follower_to_leader(self, robot, fps: float = 30.0) -> float:
-        """Walk the follower onto the leader's pose before teleoperation begins. MOVES THE ARM.
-
-        teleop_step writes the leader's position straight to the follower, and this robot's
-        config sets max_relative_target to null, so lerobot's per-step cap is not in play. If
-        the leader is left somewhere far away -- which it is, every time the operator lets go
-        of it -- the first step of teleoperation closes the whole gap at once.
-
-        That was tolerable while teleoperation only began once recording did, with a hand on
-        the leader. It is not tolerable now that the arm goes live when the setup gate opens,
-        with the operator's hands on the props.
-
-        So the gap is closed deliberately instead: smoothstepped over a duration proportional
-        to its size, at a rate slow enough to watch and interrupt. Returns the gap it started
-        from, in the arms' own units.
-        """
-        try:
-            pairs = [(robot.leader_arms[n], robot.follower_arms[n])
-                     for n in robot.leader_arms if n in robot.follower_arms]
-        except Exception:
-            logger.exception("could not pair the leader and follower arms")
-            return 0.0
-        if not pairs:
-            return 0.0
-
-        starts, goals = [], []
-        for leader, follower in pairs:
-            goals.append(np.asarray(leader.read("Present_Position"), dtype=np.float32))
-            starts.append(np.asarray(follower.read("Present_Position"), dtype=np.float32))
-        gap = max((float(np.abs(g - s).max()) for g, s in zip(goals, starts)), default=0.0)
-        if gap <= self.ALIGN_TOL:
-            return gap
-
-        seconds = min(self.ALIGN_MAX_S, max(self.ALIGN_MIN_S, gap / self.ALIGN_RATE_RAD_S))
-        steps = max(2, int(seconds * fps))
-        self.log_signal.emit(
-            colored(f"aligning the arm to the leader: {gap:.2f} to close over {seconds:.1f}s "
-                    f"-- keep clear (Enter stops)", "yellow"), False)
-        for k in range(1, steps + 1):
-            if self.events.get("emergency") or self.events.get("stop_recording"):
-                break
-            u = k / steps
-            u = u * u * (3 - 2 * u)                  # smoothstep: no velocity step at either end
-            for (_, follower), s, g in zip(pairs, starts, goals):
-                follower.write("Goal_Position", (s + (g - s) * u).astype(np.float32))
-            busy_wait(1 / fps)
-        return gap
 
     def wait_for_start(self, cfg, robot=None) -> bool:
         """Block the recording thread until G (go), or a stop. Returns True if we should stop.
@@ -3040,11 +3005,12 @@ class MainWindow(QMainWindow):
         self.setup_gate_signal.emit()
 
         fps = float(getattr(cfg, "fps", 30) or 30)
-        # Close any gap to the leader deliberately, before the first teleop step closes it all
-        # at once. Does nothing when the arms are already together, which is the usual case
-        # between episodes.
+        # Go to the start pose and stay there. Every episode begins from the same pose now, so
+        # there is nothing to align to and nothing to set by hand -- and aligning to wherever
+        # the leader was left is what used to drag the arm somewhere else before the scene was
+        # even staged.
         if robot is not None:
-            self.align_follower_to_leader(robot, fps)
+            self.drive_to_start_pose(robot, fps, hold=True)
         keys, last_emit, warned = None, 0.0, False
         while not self.events["start_episode"]:
             step_t = time.perf_counter()
@@ -3052,8 +3018,11 @@ class MainWindow(QMainWindow):
                 # The arm is following the leader by now, so breaking out is not enough.
                 if robot is not None:
                     self._emergency_release(robot)
+                    self.release_leader(robot)
                 return True
             if self.events["stop_recording"]:
+                if robot is not None:
+                    self.release_leader(robot)
                 return True
             if robot is not None and self.events.get("go_home"):
                 self.events["go_home"] = False
@@ -3083,6 +3052,11 @@ class MainWindow(QMainWindow):
                         logger.exception("teleoperation failed while waiting to start")
             busy_wait(max(0.0, 1 / fps - (time.perf_counter() - step_t)))
         self.events["start_episode"] = False
+        # The episode is about to be teleoperated, so the leader has to be the operator's
+        # again. It is already at the start pose, so nothing moves when it changes hands.
+        if robot is not None:
+            self.release_leader(robot)
+            self.log_signal.emit(colored("leader released -- recording", "cyan"), False)
         return False
 
     def set_start_episode(self) -> None:
