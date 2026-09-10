@@ -119,12 +119,25 @@ close on nothing or knock the fruit, **reopen, back off, re-approach, grasp**. A
 episodes are clean first-try successes, so the policy has never seen the state it spends most of
 its time in.
 
-**Consider smaller props for the round fruits.** If the point of this round is spatial and
-semantic generalization, a grasp needing millimetre precision becomes the dominant failure mode
-and it affects `baseline`, `vision` and `special` alike — so it adds noise to exactly the
-comparison the experiment exists to make. At ten trials per arm, a grasp that succeeds a third
-of the time regardless of arm cannot distinguish them. A ~25 mm prop leaves 9 mm per side,
-inside what the policy can hit, and the OOD axes stay measurable.
+**Or use props that fit.** "Prop" here just means the object being picked up, and nothing needs
+buying — the wooden blocks already used by `pick_place_block_bowl` measure **13 mm**, leaving
+15 mm of clearance per side, comfortably more than the policy's error:
+
+| prop | width held | clearance per side | vs the policy's 7-12 mm error |
+|---|---|---|---|
+| apple / orange / peach | 34-36 mm | 3.3-4.5 mm | error is 2-3x the clearance |
+| **wooden block** | **13 mm** | **15 mm** | clearance is 1.5-2x the error |
+| banana | 10 mm | 16 mm | comfortable |
+| tape roll | 3 mm | 20 mm | comfortable |
+
+If the point of this round is spatial and semantic generalization, a grasp needing millimetre
+precision becomes the dominant failure mode, and it affects `baseline`, `vision` and `special`
+alike — so it adds noise to exactly the comparison the experiment exists to make. At ten trials
+per arm, a grasp that succeeds a third of the time regardless of arm cannot distinguish them.
+
+Running the OOD protocol on the **blocks** instead of the fruit costs nothing: four distinct
+objects with four distinct names, so the semantic hold-out still works (withhold "yellow block"
+rather than "banana"), and the routes and lighting are unchanged.
 
 Keeping the large fruits is a legitimate choice — it is the harder, more realistic task — but
 then **report per-object success separately**, so a grasp bottleneck is not read as a difference
