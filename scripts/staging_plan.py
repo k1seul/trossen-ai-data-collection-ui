@@ -73,7 +73,14 @@ def target_object(v: str) -> str:
 # Two levels rather than three. Fewer than hoped, but both are a switch someone can flick.
 LIGHTING = ["A: overheads only", "B: overheads + sub lamp"]
 
-NUDGES = ["none", "shoulder +5deg", "shoulder -5deg", "elbow +5deg", "wrist +10deg"]
+# Fixed, on purpose. Five degrees of shoulder is the one part of staging a person cannot set
+# by hand, so a start-pose axis does not become five conditions -- it becomes unmeasured
+# variance in the follower pose that every episode records, spread across an already thin
+# budget. LIBERO, which this is being compared against, starts from one pose too.
+#
+# The variance worth having is in the scene: object cell, container cell, distractors,
+# lighting. Those are all things a hand can place and a camera can check. This one was neither.
+NUDGES = ["none"]
 
 
 def short(v: str) -> str:

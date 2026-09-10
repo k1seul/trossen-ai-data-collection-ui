@@ -639,6 +639,7 @@ class MainWindow(QMainWindow):
             (("N",), self.show_staging),          # re-show the current staging row
             (("Ctrl+N",), self._load_staging_sheet),   # re-read the sheet from disk
             (("C",), self.check_camera_framing),   # has the camera been knocked?
+            (("H",), self.request_start_pose),     # take the arm to the start pose
         ):
             for k in keys:
                 sc = QShortcut(QKeySequence(k), self)
@@ -2417,6 +2418,13 @@ class MainWindow(QMainWindow):
             warn.setWordWrap(True)
             left.addWidget(warn)
 
+        home = QPushButton("Arm to start pose  (H)", dialog)
+        home.setToolTip("Drives the leader to the pose every episode begins from; "
+                        "the follower comes with it.")
+        home.clicked.connect(lambda: self.request_start_pose())
+        left.addWidget(home)
+        QShortcut(QKeySequence("H"), dialog).activated.connect(self.request_start_pose)
+
         start = QPushButton("Setup done -- start recording  (G)", dialog)
         if mismatch:
             start.setEnabled(False)
@@ -2882,6 +2890,64 @@ class MainWindow(QMainWindow):
     ALIGN_MAX_S = 6.0
     ALIGN_TOL = 0.03            # radians; below this the arms are already together
 
+    def drive_to_start_pose(self, robot, fps: float = 30.0) -> None:
+        """Take both arms to the pose every episode begins from. MOVES THE ARM.
+
+        Setting a start pose by hand means holding the leader still at a particular
+        configuration, which is the one part of staging a person cannot do accurately -- and
+        the follower's pose is what the episode records, so "roughly there" becomes part of the
+        data.
+
+        The LEADER is what gets driven, not the follower: teleoperation is running, so a
+        follower commanded anywhere is pulled straight back to wherever the leader is on the
+        next step. Driving the leader and letting the follower track it is the same motion the
+        operator would have made, done accurately. Torque goes back off at the end, which on
+        this arm means gravity compensation rather than limp -- it stays where it is left.
+        """
+        pose = list(EPISODE_START_POSE)
+        seconds = 2.5
+        steps = max(2, int(seconds * fps))
+        try:
+            for arm in robot.leader_arms.values():
+                arm.write("Torque_Enable", 1)                      # position mode
+            starts = {n: np.asarray(a.read("Present_Position"), dtype=np.float32)
+                      for n, a in robot.leader_arms.items()}
+        except Exception:
+            logger.exception("could not take the leader into position mode")
+            return
+        self.log_signal.emit(
+            colored(f"driving to the start pose over {seconds:.1f}s -- keep clear "
+                    f"(Enter stops)", "yellow"), False)
+        try:
+            for k in range(1, steps + 1):
+                if self.events.get("emergency") or self.events.get("stop_recording"):
+                    break
+                u = k / steps
+                u = u * u * (3 - 2 * u)                            # no velocity step at the ends
+                for n, arm in robot.leader_arms.items():
+                    s = starts[n]
+                    goal = s + (np.asarray(pose[:len(s)], dtype=np.float32) - s) * u
+                    arm.write("Goal_Position", goal.astype(np.float32))
+                # Keep stepping teleoperation so the follower comes with it, rather than
+                # snapping across the whole gap once the loop resumes.
+                try:
+                    robot.teleop_step(record_data=False)
+                except Exception:
+                    pass
+                busy_wait(1 / fps)
+        finally:
+            try:
+                for arm in robot.leader_arms.values():
+                    arm.write("Torque_Enable", 0)                  # back to gravity compensation
+            except Exception:
+                logger.exception("could not hand the leader back")
+        self.log_signal.emit(colored("at the start pose", "cyan"), False)
+
+    def request_start_pose(self) -> None:
+        """H, or the gate's button. The move itself happens on the thread that owns the arm."""
+        self.events["go_home"] = True
+        self.set_logs("Start pose requested -- the arm will move.", clear=False)
+
     def align_follower_to_leader(self, robot, fps: float = 30.0) -> float:
         """Walk the follower onto the leader's pose before teleoperation begins. MOVES THE ARM.
 
@@ -2980,6 +3046,9 @@ class MainWindow(QMainWindow):
                 return True
             if self.events["stop_recording"]:
                 return True
+            if robot is not None and self.events.get("go_home"):
+                self.events["go_home"] = False
+                self.drive_to_start_pose(robot, fps)
             if robot is not None:
                 try:
                     observation, _ = robot.teleop_step(record_data=True)
