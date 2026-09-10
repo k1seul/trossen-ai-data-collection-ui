@@ -1112,6 +1112,21 @@ class MainWindow(QMainWindow):
         data recorded so far, saves it, and moves on to the next episode
         (or ends the session if this was the last episode).
         """
+        # Refuse once while the object is still held. Two takes in thirteen ended with the
+        # jaws shut on the prop -- cut before the release, which is the part of the task the
+        # policy was already worst at, so those episodes teach the wrong half of it. A second
+        # press goes through: sometimes ending mid-carry is deliberate.
+        state = getattr(self, "last_joint_state", None)
+        if state is not None and len(state) and float(state[-1]) < 0.020:
+            now = time.perf_counter()
+            if now - getattr(self, "_finish_warned_at", -99.0) > 5.0:
+                self._finish_warned_at = now
+                logger.info("finish refused: still holding the object")
+                self.set_logs(
+                    "Still holding the object -- the episode would end before the release. "
+                    "Press Space again to end it anyway.", clear=False)
+                return
+
         logger.info("Finish episode triggered by user")
         # NOT here. Space fires the instant the operator ends the take, on the UI thread, while
         # the worker has yet to write the episode's row -- so the join was logged against the
@@ -2903,6 +2918,13 @@ class MainWindow(QMainWindow):
                         self.update_speed_warning(max_velocity)
                 prev_action = action["action"]
                 prev_action_t = action_t
+
+            state = observation.get("observation.state")
+            if state is not None:
+                # For the finish guard: pressing Space with the jaws still closed on the
+                # object ends the take before the release, and the release is the half of the
+                # task the policy was failing at.
+                self.last_joint_state = state.numpy()
 
             if dataset is not None:  # Record data into the dataset if provided.
                 frame = {**observation, **action, "task": single_task}
