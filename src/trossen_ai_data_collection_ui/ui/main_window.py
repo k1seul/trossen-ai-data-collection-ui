@@ -543,6 +543,8 @@ class MainWindow(QMainWindow):
             "exit_early": False,
             "stop_recording": False,
             "rerecord_episode": False,
+            "emergency": False,
+            "start_episode": False,
             "finish_episode": False,
             "fail_episode": False,
         }
@@ -587,6 +589,8 @@ class MainWindow(QMainWindow):
             (("Space", "S"), self.set_finish_episode),
             (("F",), self.set_fail_episode),
             (("R",), self.set_skip_reset),
+            (("G",), self.set_start_episode),            # begin recording this episode
+            (("Return", "Enter"), self.set_emergency),   # drop it and stop
             (("N",), self.show_staging),          # re-show the current staging row
             (("Ctrl+N",), self._load_staging_sheet),   # re-read the sheet from disk
         ):
@@ -1914,6 +1918,17 @@ class MainWindow(QMainWindow):
         while timestamp < control_time_s:  # Run the loop until the specified control time.
             start_loop_t = time.perf_counter()  # Record the loop start time.
 
+            # Emergency release. Handled HERE rather than from the key handler because during
+            # teleoperation the follower is re-commanded to the leader's position every tick:
+            # a gripper-open written from the UI thread would be overwritten within 33 ms, and
+            # two threads writing to the driver at once is worse than not stopping at all.
+            if events.get("emergency"):
+                events["emergency"] = False
+                self._emergency_release(robot)
+                events["stop_recording"] = True
+                events["exit_early"] = True
+                break
+
             if teleoperate:  # Perform teleoperation if enabled.
                 observation, action = robot.teleop_step(record_data=True)
 
@@ -1977,6 +1992,49 @@ class MainWindow(QMainWindow):
 
         if teleoperate:
             self.update_speed_warning(0.0)  # Clear the warning once teleoperation stops.
+
+    def wait_for_start(self, cfg) -> bool:
+        """Block the recording thread until G (go), or a stop. Returns True if we should stop.
+
+        Runs on the worker thread; the flags are set from the UI thread, which is why this
+        polls a flag rather than touching Qt.
+        """
+        self.events["start_episode"] = False
+        self.log_signal.emit(
+            colored("position the arm and the props, then press G to record "
+                    "(Enter = emergency release)", "cyan"), False)
+        while not self.events["start_episode"]:
+            if self.events["stop_recording"] or self.events.get("emergency"):
+                return True
+            time.sleep(0.05)
+        self.events["start_episode"] = False
+        return False
+
+    def set_start_episode(self) -> None:
+        """G: the scene is staged and the arm is where it should start. Begin recording."""
+        logger.info("Start episode triggered by user")
+        self.events["start_episode"] = True
+
+    def _emergency_release(self, robot) -> None:
+        """Open the follower's gripper and hold it where it is. Called from the control loop."""
+        try:
+            for name, arm in getattr(robot, "follower_arms", {}).items():
+                here = arm.read("Present_Position")
+                target = list(here)
+                target[-1] = 0.040          # jaws open; 0 is closed on this arm
+                arm.write("Goal_Position", target)
+                logger.warning("EMERGENCY: opened %s gripper and held position", name)
+            self.log_signal.emit(
+                colored("EMERGENCY STOP -- gripper opened, arm holding position, "
+                        "recording stopped", "red"), False)
+        except Exception:
+            logger.exception("emergency release failed")
+
+    def set_emergency(self) -> None:
+        """Enter: drop whatever is held and stop. The control loop acts on this within a tick."""
+        logger.warning("Emergency triggered by user")
+        self.events["emergency"] = True
+        self.events["exit_early"] = True
 
     def log_control_info(
         self,
@@ -2204,6 +2262,15 @@ class MainWindow(QMainWindow):
                 )
 
                 self.ui.label_total_time.setText(f"{float(cfg.episode_time_s)}s")
+
+                # Wait until the operator says the scene and the start pose are ready. There is
+                # no warm-up phase in this loop -- recording begins the instant the episode
+                # does -- so without this the arm's starting configuration is whatever the last
+                # episode left, and staging has to be finished before the clock is running.
+                # Space is deliberately NOT the key: it means "finish" a few seconds later, and
+                # a start key that is also a stop key is one slip from a discarded take.
+                if self.wait_for_start(cfg):
+                    break
 
                 # Enable rerecord, finish and fail buttons during episode recording
                 self.ui.pushButton_rerecord.setEnabled(True)

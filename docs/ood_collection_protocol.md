@@ -247,11 +247,27 @@ The 0.02–0.05 band should be well above 15%, not 2%.
 
 | key | |
 |---|---|
+| **`G`** | the scene and the start pose are ready — **begin recording** |
 | **`Space`** or `S` | finish the episode now and **keep** it — the object is placed |
-| `F` | discard this take and move on — spoiled, e.g. the fruit went off the mat |
+| `F` | discard this take and move on — spoiled, e.g. the block went off the mat |
+| **`Enter`** | **emergency: open the gripper, hold position, stop recording** |
 | `R` | stop waiting out the reset — the scene is re-staged |
+| `N` / `Ctrl+N` | re-show the staging row / re-read the sheet |
 
 Reaching for the mouse is what made every episode run its clock out last time.
+
+**`G` before each episode.** Recording begins the instant the episode does — there is no warm-up
+phase in this loop — so without a gate, staging happens while the clock is running and the arm
+starts from wherever the last episode left it. `G` gives you time to place the blocks, set the
+lighting and nudge the start pose, and starts the take when you are actually ready. Start is
+deliberately **not** `Space`: that means "finish" a few seconds later, and one key doing both is
+one slip from a discarded take.
+
+**`Enter` is the stop.** It opens the follower's gripper, holds the arm where it is, and ends
+the recording. It is handled inside the control loop rather than from the key handler, because
+during teleoperation the follower is re-commanded to the leader's position every tick — a
+gripper-open written from the UI thread would be overwritten within 33 ms, and two threads
+writing to the driver at once is worse than not stopping at all.
 
 ## Keep recording all three cameras
 
