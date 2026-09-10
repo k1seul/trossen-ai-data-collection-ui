@@ -40,6 +40,21 @@ afterwards, keeps them separable and lets the same data answer several questions
 
 What collection has to deliver instead is **coverage** and **decorrelation**.
 
+### Both containers on the mat, and the sentence names one
+
+Use the `block_to_named_container` task: eight instructions, four colours crossed with *bowl*
+and *pot*, with **both containers on the mat every episode**.
+
+Container variety is not decoration. The pot's walls are higher than the bowl's, so "over the
+container" cannot be one memorised height — which is exactly the knife-edge the current policy
+is stuck on. And with only one container present, "bowl" is as uninformative as "red" was with
+one block out: there is only one place to put anything, so the word never has to be read.
+
+Naming the destination is also the most direct test of the failure that started all this. The
+previous policy learned each task's container position as part of the task; here the destination
+changes sentence by sentence while both containers sit in randomised zones, so it can only be
+found by reading and looking.
+
 ### Put more than one block on the mat
 
 With a single object present, the instruction carries no information — there is only one thing
@@ -110,14 +125,15 @@ on another screen.
 ## Session plan
 
 ```bash
-python scripts/staging_plan.py --task pick_place_fruit_bowl --episodes 6 --csv sheet.csv
+python scripts/staging_plan.py --task block_to_named_container --episodes 3 \
+    --csv ~/.trossen/trossen_ai_data_collection/plan/staging_sheet.csv
 ```
 
-4 colours x 6 routes x 6 episodes = **144 episodes**. At ~20 s of motion plus the reset and
+8 instructions (4 colours x 2 containers) x 6 routes x 3 episodes = **144 episodes**. At ~20 s of motion plus the reset and
 placing three blocks, budget about 50 s per episode: roughly **2 hours of cycle time**, so a
 full session.
 
-`--episodes 4` is 96 episodes and about 80 minutes, and still fills every cell. **The sheet is
+`--episodes 2` is 96 episodes and about 80 minutes, and still fills every cell. **The sheet is
 shuffled, so stopping early leaves coverage roughly balanced** — record in the order given and
 stop when you have to. An empty cell is the only thing that cannot be fixed later.
 
