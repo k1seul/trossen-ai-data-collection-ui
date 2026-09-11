@@ -580,6 +580,7 @@ class MainWindow(QMainWindow):
             "exit_early": False,
             "stop_recording": False,
             "rerecord_episode": False,
+            "discard_episode": False,
             "emergency": False,
             "start_episode": False,
             "finish_episode": False,
@@ -3021,6 +3022,11 @@ class MainWindow(QMainWindow):
             if events.get("emergency"):
                 events["emergency"] = False
                 self._emergency_release(robot)
+                # Whatever was being recorded stops here, mid-reach or mid-carry, and gets
+                # saved looking like a short ordinary take. One such episode is already in the
+                # dataset: 2.7 seconds, the jaws opening and nothing else. Enter is pressed
+                # because something is wrong, so the take goes with it.
+                events["discard_episode"] = True
                 events["stop_recording"] = True
                 events["exit_early"] = True
                 break
@@ -3326,7 +3332,11 @@ class MainWindow(QMainWindow):
             for name, arm in getattr(robot, "follower_arms", {}).items():
                 here = arm.read("Present_Position")
                 target = list(here)
-                target[-1] = 0.040          # jaws open; 0 is closed on this arm
+                # 0.036, not the 0.040 this used to command. The jaws' limit is 0.044 and a
+                # fast open overshoots: the controller reported 0.044152 and faulted with
+                # "Joint 6 position limit exceeded", which then raised again on disconnect.
+                # An emergency stop that ends in a faulted arm is not much of a stop.
+                target[-1] = 0.036          # jaws open; 0 is closed on this arm
                 arm.write("Goal_Position", target)
                 logger.warning("EMERGENCY: opened %s gripper and held position", name)
             self.log_signal.emit(
@@ -3655,6 +3665,15 @@ class MainWindow(QMainWindow):
                     self.reset_environment_async(reset_duration)  # Non-blocking - returns immediately
                     log_say("Reset", cfg.play_sounds, blocking=True)
                     self.log_signal.emit("Reset the environment", True)
+
+                # An emergency ended this take partway through; it is not an episode.
+                if self.events.get("discard_episode"):
+                    logger.warning(f"Episode {episode_idx} discarded: emergency stop")
+                    self.log_signal.emit(
+                        "Emergency stop -- the part-recorded episode was discarded.", False)
+                    self.events["discard_episode"] = False
+                    dataset.clear_episode_buffer()
+                    break
 
                 # Handle rerecord event
                 if self.events["rerecord_episode"]:
