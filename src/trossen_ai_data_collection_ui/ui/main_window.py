@@ -490,6 +490,7 @@ class MainWindow(QMainWindow):
         # So a session log can be read afterwards. Every recent session ended at a different
         # point with no traceback, which is what a closed window and a native crash look like
         # alike -- and there was no way to tell which had happened.
+        self._uploading = False
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(
@@ -2835,6 +2836,26 @@ class MainWindow(QMainWindow):
         self.staging_idx += 1
         self.show_staging()
 
+    def closeEvent(self, event):
+        """Do not let the window close an upload that is still running.
+
+        aboutToQuit is too late -- by then the process is going. Every recorded session so far
+        pushed for one second and then died here, which is why the Hub had seven episodes
+        against a hundred and nine on disk.
+        """
+        if getattr(self, "_uploading", False):
+            keep = QMessageBox.question(
+                self, "Upload in progress",
+                "The dataset is still uploading to the Hub. Closing now cancels it -- the "
+                "episodes stay on disk, but the Hub copy will be incomplete.\n\n"
+                "Close anyway?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if keep != QMessageBox.Yes:
+                event.ignore()
+                return
+            logger.warning("window closed during an upload; the Hub copy is incomplete")
+        super().closeEvent(event)
+
     def on_ui_thread(self) -> bool:
         """Whether the caller is on the GUI thread.
 
@@ -3825,9 +3846,18 @@ class MainWindow(QMainWindow):
                     error_occurred = True
                 else:
                     logger.info(f"Pushing dataset to hub: {cfg.repo_id}")
+                    # Say it, and keep saying it. Every session so far started this push and
+                    # none finished: the window was closed a second later, because from
+                    # outside an upload looks exactly like an idle window. Hundreds of
+                    # megabytes take minutes.
+                    self._uploading = True
+                    self.log_signal.emit(
+                        f"UPLOADING {cfg.repo_id} -- this takes minutes. Do NOT close the "
+                        f"window; the episodes are safe on disk either way.", False)
                     try:
                         dataset.push_to_hub(tags=cfg.tags, private=cfg.private)
                         logger.info("Dataset pushed to hub successfully")
+                        self.log_signal.emit(f"Upload finished: {cfg.repo_id}", False)
                     except Exception as e:
                         # Episodes on disk are the expensive part and they are safe; a failed
                         # upload is worth reporting in the window rather than ending the run.
@@ -3836,6 +3866,8 @@ class MainWindow(QMainWindow):
                             f"Recorded {episodes} episode(s) locally, but the upload failed:"
                             f"\n{e}\nThe data is at {root}.", False)
                         error_occurred = True
+                    finally:
+                        self._uploading = False
 
         if not error_occurred:
             log_say("Done", cfg.play_sounds)
