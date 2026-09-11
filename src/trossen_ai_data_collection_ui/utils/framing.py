@@ -601,11 +601,17 @@ def lighting_signature(rgb: np.ndarray, crop: "tuple[int,int,int] | None",
             "v_spread": float(v.std() / med)}
 
 
-# Each feature divided by how much it is allowed to wander before it means something. Set from
-# the same scene photographed twice under one condition: anything smaller than this is the
-# camera's own variation, not the light.
-LIGHT_SCALE = {"v_median": 6.0, "r_over_b": 0.010, "g_over_b": 0.010,
-               "evenness": 0.030, "v_spread": 0.030}
+# Each feature divided by how much it is allowed to wander before it means something: anything
+# smaller than this is the camera's own variation, not the light.
+#
+# These were guessed from one scene photographed twice, and guessed loose -- so loose that the
+# two conditions 108 recorded episodes were actually shot under measured 1.7 apart and were
+# reported as indistinguishable. They are now the pooled within-condition standard deviation
+# over those episodes, 56 labelled A and 52 labelled B, which is the same quantity measured
+# instead of estimated. A to B is 4.5 on this scale. See real_robot/lighting_profiles.py in the
+# dreamer-vla repo, which recomputes both these and the profiles themselves.
+LIGHT_SCALE = {"v_median": 2.633, "r_over_b": 0.00526, "g_over_b": 0.00307,
+               "evenness": 0.0124, "v_spread": 0.0059}
 
 
 def lighting_distance(a: dict, b: dict) -> float:
