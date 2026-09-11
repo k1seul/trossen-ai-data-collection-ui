@@ -474,6 +474,7 @@ class MainWindow(QMainWindow):
     log_signal = Signal(str, bool)  # Signal for logging messages.
     setup_gate_signal = Signal()   # worker asks the UI thread to raise the setup gate
     total_time_signal = Signal(str)  # worker asks the UI thread to set the clock label
+    ui_call_signal = Signal(object)  # run a callable on the UI thread, from any thread
 
     def __init__(self) -> None:
         """
@@ -495,6 +496,7 @@ class MainWindow(QMainWindow):
                 lambda: logger.info("application quit normally -- a session log that ends "
                                     "without this line stopped some other way"))
         self.total_time_signal.connect(self.ui.label_total_time.setText)
+        self.ui_call_signal.connect(lambda fn: fn())
 
         self.thread = None
 
@@ -725,6 +727,10 @@ class MainWindow(QMainWindow):
         and assigns it to the camera widgets. It also resets the camera labels to empty.
         If the image cannot be loaded, warnings or errors are printed to the console.
         """
+        if not self.on_ui_thread():
+            self.run_on_ui(self.initialize_image)
+            return
+
         # Load and convert the placeholder image.
         if os.path.exists(self.placeholder_path):  # Check if the placeholder path exists.
             self.placeholder_image = cv2.imread(
@@ -1324,6 +1330,10 @@ class MainWindow(QMainWindow):
             (max absolute per-joint delta over dt) for the current control
             loop iteration, in rad/s. Pass 0.0 to clear the warning.
         """
+        if not self.on_ui_thread():
+            self.run_on_ui(lambda v=max_velocity: self.update_speed_warning(v))
+            return
+
         threshold = getattr(self, "max_joint_velocity_rad_s", DEFAULT_MAX_JOINT_VELOCITY_RAD_S)
         is_too_fast = max_velocity > threshold
 
@@ -1717,7 +1727,7 @@ class MainWindow(QMainWindow):
 
         def reset_task():
             try:
-                self.ui.pushButton_skip_reset.setEnabled(True)
+                self.run_on_ui(lambda: self.ui.pushButton_skip_reset.setEnabled(True))
                 reset_environment(
                     self.robot,
                     self.events,
@@ -1728,7 +1738,7 @@ class MainWindow(QMainWindow):
                 logger.error(f"Error during async reset: {e}")
                 self.log_signal.emit(f"Error during reset: {e}", True)
             finally:
-                self.ui.pushButton_skip_reset.setEnabled(False)
+                self.run_on_ui(lambda: self.ui.pushButton_skip_reset.setEnabled(False))
 
         logger.debug(f"Starting async environment reset ({duration}s)")
         self._reset_thread = threading.Thread(target=reset_task, daemon=True)
@@ -1864,6 +1874,10 @@ class MainWindow(QMainWindow):
         presets with zero episodes recorded, so under-recorded variants are
         easy to spot at a glance.
         """
+        if not self.on_ui_thread():
+            self.run_on_ui(self.update_task_history_summary)
+            return
+
         known_objects = getattr(self, "_known_objects", [])
         # Include any object recorded live this session that wasn't in the
         # known list yet (e.g. a brand new one typed in mid-session).
@@ -2816,6 +2830,30 @@ class MainWindow(QMainWindow):
         self.staging_idx += 1
         self.show_staging()
 
+    def on_ui_thread(self) -> bool:
+        """Whether the caller is on the GUI thread.
+
+        Against the application's thread, not self.thread(): this class assigns
+        self.thread = None in __init__, which shadows QObject.thread and makes the obvious
+        form raise.
+        """
+        app = QApplication.instance()
+        return app is not None and QThread.currentThread() is app.thread()
+
+    def run_on_ui(self, fn) -> None:
+        """Run fn on the UI thread, wherever it is called from.
+
+        Touching a widget from the recording thread is undefined behaviour in Qt, and what it
+        does here is kill the process outright: no traceback, no message, the session log
+        simply stops. That is what "it keeps dying" was -- set_logs writes straight into the
+        log browser, and moving advance_staging onto the worker put that call on the wrong
+        thread after every episode.
+        """
+        if self.on_ui_thread():
+            fn()
+        else:
+            self.ui_call_signal.emit(fn)
+
     def set_logs(self, logs: str, clear: bool = True) -> None:
         """
         Update the log display with a new log message.
@@ -2830,6 +2868,10 @@ class MainWindow(QMainWindow):
                       If False, the new log is appended with a line break.
         :return: None
         """
+
+        if not self.on_ui_thread():
+            self.log_signal.emit(logs, clear)      # already queued to the UI thread
+            return
 
         # Reference to the QTextBrowser
         text_browser = self.ui.textBrowser_log
@@ -3433,7 +3475,7 @@ class MainWindow(QMainWindow):
         log_say("Warmup", cfg.play_sounds)
         logger.info(f"Warmup phase starting ({cfg.warmup_time_s}s)")
         self.log_signal.emit("Warmup phase: Teleoperate the robot and verify camera feeds.", True)
-        self.ui.label_total_time.setText(f"{float(cfg.warmup_time_s)}s")
+        self.total_time_signal.emit(f"{float(cfg.warmup_time_s)}s")
         self.control_loop(
             robot=robot,
             control_time_s=cfg.warmup_time_s,
@@ -3529,9 +3571,12 @@ class MainWindow(QMainWindow):
                     colored(f"recording: {episode_instruction}", "yellow"), False)
 
                 # Enable rerecord, finish and fail buttons during episode recording
-                self.ui.pushButton_rerecord.setEnabled(True)
-                self.ui.pushButton_finish_episode.setEnabled(True)
-                self.ui.pushButton_fail_episode.setEnabled(True)
+                # Through the UI thread: this is the recorder, and enabling a widget from
+                # off the GUI thread is the same undefined behaviour that was killing the
+                # process after each episode.
+                self.run_on_ui(lambda: (self.ui.pushButton_rerecord.setEnabled(True),
+                                 self.ui.pushButton_finish_episode.setEnabled(True),
+                                 self.ui.pushButton_fail_episode.setEnabled(True)))
 
                 self.control_loop(
                     robot=robot,
@@ -3549,9 +3594,9 @@ class MainWindow(QMainWindow):
                 self.worker.progress.emit(100)
 
                 # Disable rerecord, finish and fail buttons until new episode is started
-                self.ui.pushButton_rerecord.setEnabled(False)
-                self.ui.pushButton_finish_episode.setEnabled(False)
-                self.ui.pushButton_fail_episode.setEnabled(False)
+                self.run_on_ui(lambda: (self.ui.pushButton_rerecord.setEnabled(False),
+                                 self.ui.pushButton_finish_episode.setEnabled(False),
+                                 self.ui.pushButton_fail_episode.setEnabled(False)))
 
                 # Reset phase - start reset without blocking
                 if not self.events["stop_recording"] and (
@@ -3775,7 +3820,7 @@ class MainWindow(QMainWindow):
             if not self._connect_robot_with_timeout(robot):
                 self.set_recording_ui_elements_enabled(True)
                 return None
-        self.ui.label_total_time.setText(f"{float(cfg.teleop_time_s)}s")
+        self.total_time_signal.emit(f"{float(cfg.teleop_time_s)}s")
         self.control_loop(
             robot=robot,
             control_time_s=cfg.teleop_time_s,
