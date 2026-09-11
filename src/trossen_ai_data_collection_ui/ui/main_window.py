@@ -1118,20 +1118,24 @@ class MainWindow(QMainWindow):
         data recorded so far, saves it, and moves on to the next episode
         (or ends the session if this was the last episode).
         """
-        # Refuse once while the object is still held. Two takes in thirteen ended with the
-        # jaws shut on the prop -- cut before the release, which is the part of the task the
-        # policy was already worst at, so those episodes teach the wrong half of it. A second
-        # press goes through: sometimes ending mid-carry is deliberate.
+        # Pressing Space during a carry used to be refused, and a second press went through --
+        # which is exactly what an operator does when a key seems not to have registered, so
+        # takes kept ending before the release anyway. Refusing was the wrong shape of answer:
+        # the release is not something to time, it is something to wait for.
+        #
+        # So Space during a carry ARMS the finish, and the episode ends a beat after the jaws
+        # open. That beat also keeps the release clear of the final 24 frames the loader drops
+        # from every episode -- inside those, the release is in the recording and never reaches
+        # training.
         state = getattr(self, "last_joint_state", None)
         if state is not None and len(state) and float(state[-1]) < 0.020:
-            now = time.perf_counter()
-            if now - getattr(self, "_finish_warned_at", -99.0) > 5.0:
-                self._finish_warned_at = now
-                logger.info("finish refused: still holding the object")
-                self.set_logs(
-                    "Still holding the object -- the episode would end before the release. "
-                    "Press Space again to end it anyway.", clear=False)
+            if not self.events.get("finish_after_release"):
+                self.events["finish_after_release"] = True
+                logger.info("finish armed: will end once the object is released")
+                self.set_logs("Armed -- the episode will end a moment after you release. "
+                              "Press Space again to end it now instead.", clear=False)
                 return
+            logger.info("finish forced while still holding")
 
         logger.info("Finish episode triggered by user")
         # NOT here. Space fires the instant the operator ends the take, on the UI thread, while
@@ -3042,6 +3046,19 @@ class MainWindow(QMainWindow):
                 # task the policy was failing at.
                 self.last_joint_state = state.numpy()
 
+                # Armed by Space during a carry: end a beat after the jaws open, so the
+                # release lands in the part of the episode that trains.
+                if (events.get("finish_after_release")
+                        and float(self.last_joint_state[-1]) > 0.030):
+                    if self._release_at is None:
+                        self._release_at = frame_counter
+                        self.log_signal.emit(
+                            colored("released -- ending the episode", "yellow"), False)
+                    elif frame_counter - self._release_at >= self.FINISH_TAIL_FRAMES:
+                        events["finish_after_release"] = False
+                        events["finish_episode"] = True
+                        events["exit_early"] = True
+
             if dataset is not None:  # Record data into the dataset if provided.
                 frame = {**observation, **action, "task": single_task}
                 dataset.add_frame(frame)
@@ -3099,6 +3116,12 @@ class MainWindow(QMainWindow):
     ALIGN_MIN_S = 0.8
     ALIGN_MAX_S = 6.0
     ALIGN_TOL = 0.03            # radians; below this the arms are already together
+
+    # How long to keep recording after the jaws open, when Space was pressed during the carry.
+    # Longer than the 24 frames the loader drops off the end of every episode, so the release
+    # sits in the part that trains rather than the part discarded; the takes that went well by
+    # hand had a median tail of 52.
+    FINISH_TAIL_FRAMES = 45
 
     def release_leader(self, robot) -> None:
         """Hand the leader back to the operator: torque off, which here is gravity compensation."""
@@ -3200,6 +3223,8 @@ class MainWindow(QMainWindow):
         gripper first, exactly as the control loop does.
         """
         self.events["start_episode"] = False
+        self.events["finish_after_release"] = False
+        self._release_at = None
         # Say that the follower is live before it moves. It starts tracking the leader the
         # moment this gate opens, which is earlier than it used to -- and if the leader was
         # left somewhere far from the follower, the first step closes that gap at once.
