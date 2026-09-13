@@ -36,20 +36,73 @@ tasks:
 - task_name: pick_specific_item_from_clutter
   robot_model: trossen_ai_solo
   task_description: Pick up the {object} and place it in the bowl. Do not touch the other items.
-  task_objects: &id001
+  task_objects: &trained
   - red block
   - blue block
   - green block
   - red tape roll
   - blue tape roll
   - yellow tape roll
-  props: *id001
+  - cucumber
+  - banana
+  - white radish
+  - corn
+  - green pepper
+  props: *trained
+  # THREE held out, testing two different things.
+  #
+  #   yellow block, green tape roll   COMPOSITIONAL. Every colour and every kind below appears
+  #                                   in training -- yellow as a tape roll, green as a block --
+  #                                   so these are combinations the policy has never been asked
+  #                                   for, made of parts it knows well.
+  #   strawberry                      NOVEL. Not a recombination: an object that was never in
+  #                                   the training set at all. Chosen over the watermelon slice
+  #                                   and the orange because it is compact and grips like the
+  #                                   trained props -- an orange rolls and a wedge depends on
+  #                                   which way up it lands, and a failure there would be about
+  #                                   the shape rather than about novelty.
+  #
+  # Keep all three OFF THE MAT while recording. As distractors they would be seen but never
+  # named, which measures something else -- and the last round let that happen in five
+  # episodes.
   held_out_objects:
   - yellow block
   - green tape roll
+  - strawberry
   episode_length_s: 45
   warmup_time_s: 10
   reset_time_s: 25
+  long_reset_interval: 10
+  long_reset_time_s: 60
+  hf_user: k1seul
+  fps: 30
+  display_fps: 30
+  push_to_hub: true
+  play_sounds: true
+  disable_active_ui_updates: false
+  save_interval: 1
+
+# TWO objects, in order. The single-object task is one reach; this is a reach, a release, and a
+# second reach that has to start from wherever the first one ended. Nothing in the current
+# dataset requires the policy to carry state across a placement, and a forecast objective is
+# exactly the kind of thing that ought to help there -- which makes it worth having before
+# claiming the forecast does or does not help.
+#
+# {object} and {object2} are filled per episode from the staging sheet. episode_length_s is
+# doubled, because it is two of the first task end to end.
+- task_name: pick_two_in_order
+  robot_model: trossen_ai_solo
+  task_description: Pick up the {object} and place it in the bowl, then pick up the {object2}
+    and place it in the bowl.
+  task_objects: *trained
+  props: *trained
+  held_out_objects:
+  - yellow block
+  - green tape roll
+  - strawberry
+  episode_length_s: 90
+  warmup_time_s: 10
+  reset_time_s: 30
   long_reset_interval: 10
   long_reset_time_s: 60
   hf_user: k1seul

@@ -52,6 +52,118 @@ PROPS = [f"{c} {k}" for k in ("block", "tape roll")
          for c in ("red", "blue", "green", "yellow")]
 
 
+# ---------------------------------------------------------------- where, exactly
+
+FRAMING = Path.home() / ".trossen" / "trossen_ai_data_collection" / "framing" / "workspace.json"
+MM_PER_PX = 25.0 / 27.0
+
+# The bowl may not come closer than this to the object. Physical: with the container beside it
+# the jaws cannot get round the object. The last dataset never came closer than 104 mm and its
+# 5th percentile was 128.
+MIN_TARGET_BOWL_MM = 130.0
+
+# Margin from the edge of the hand-marked reachable quad, so a prop is not half off it.
+REACH_MARGIN_PX = 18
+
+
+def reachable(path: Path = FRAMING):
+    """The quad the arm was actually pushed to, and the crop, from the framing file.
+
+    The last dataset put every target inside 31% of the crop while 43% is reachable -- a 61 mm
+    band under the arm was never used once. Naming a cell leaves the spot inside it to whoever
+    is staging, and they chose the middle every time. So the sheet names the spot.
+    """
+    meta = json.loads(Path(path).read_text())
+    marks = {m["name"]: (float(m["x"]), float(m["y"])) for m in meta.get("marks", [])
+             if "x" in m}
+    need = ("top-left", "top-right", "bottom-right", "bottom-left")
+    if not all(n in marks for n in need):
+        return None, None
+    quad = [marks[n] for n in need]
+
+    # The marks are where the arm was pushed to by hand, and they came out conservative: 13 of
+    # the 95 recorded targets sat outside them, as far as 21 mm past the near edge, and the arm
+    # picked every one of them up. Taking the hull of the marks AND the positions that demonstrably
+    # worked uses both kinds of evidence instead of throwing one away.
+    done = Path.home() / ".trossen" / "trossen_ai_data_collection" / "plan" / "target_map.json"
+    if done.exists():
+        try:
+            pts = [(t["x"], t["y"]) for t in json.loads(done.read_text()).get("targets", [])]
+        except (ValueError, KeyError):
+            pts = []
+        if pts:
+            quad = _hull(quad + pts)
+    return quad, meta.get("crop_main")
+
+
+def _hull(points):
+    """Convex hull, monotone chain -- so this file keeps needing nothing but the stdlib."""
+    pts = sorted(set((round(x, 2), round(y, 2)) for x, y in points))
+    if len(pts) < 3:
+        return pts
+    def half(ps):
+        out = []
+        for q in ps:
+            while len(out) >= 2 and \
+                    (out[-1][0] - out[-2][0]) * (q[1] - out[-2][1]) - \
+                    (out[-1][1] - out[-2][1]) * (q[0] - out[-2][0]) <= 0:
+                out.pop()
+            out.append(q)
+        return out[:-1]
+    return half(pts) + half(pts[::-1])
+
+
+def _inside(poly, x, y, margin=0.0) -> bool:
+    """Point in quad, with a margin, by the sign of the cross products along each edge."""
+    n = len(poly)
+    signs = []
+    for i in range(n):
+        ax, ay = poly[i]
+        bx, by = poly[(i + 1) % n]
+        ex, ey = bx - ax, by - ay
+        L = (ex * ex + ey * ey) ** 0.5 or 1.0
+        # distance from the edge, positive on the inside for a clockwise quad
+        signs.append(((x - ax) * ey - (y - ay) * ex) / L)
+    return all(v >= margin for v in signs) or all(-v >= margin for v in signs)
+
+
+def spots(poly, rng, n: int, *, cols: int = 6, rows: int = 4, margin=REACH_MARGIN_PX):
+    """n places inside the quad, spread by construction rather than by luck.
+
+    Sampling uniformly at random clumps; rotating through a grid of sub-cells and jittering
+    inside each one covers the whole area for any n, which is the point -- the axis this is
+    being widened for is position.
+    """
+    xs = [q[0] for q in poly]; ys = [q[1] for q in poly]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    cells = [(c, r) for r in range(rows) for c in range(cols)]
+    rng.shuffle(cells)
+    out = []
+    i = 0
+    while len(out) < n and i < n * 200:
+        c, r = cells[len(out) % len(cells)]
+        x = x0 + (x1 - x0) * (c + rng.random()) / cols
+        y = y0 + (y1 - y0) * (r + rng.random()) / rows
+        i += 1
+        if _inside(poly, x, y, margin):
+            out.append((round(x, 1), round(y, 1)))
+    return out
+
+
+def far_enough(a, b, mm: float) -> bool:
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 * MM_PER_PX >= mm
+
+
+def cell_of(xy, crop, top: float = 102.0) -> str:
+    """The cell a spot falls in, so the existing zone columns stay true to the coordinates."""
+    if not crop:
+        return "?"
+    x, y, side = crop
+    col = "LCR"[min(2, max(0, int((xy[0] - x) / side * 3)))]
+    mid = (max(y, top) + y + side) / 2
+    return f"{col}-{'far' if xy[1] < mid else 'near'}"
+
+
 def target_object(v: str) -> str:
     """The physical prop a variant names, whether it is a bare name or a whole instruction."""
     if " in the " not in v:
@@ -131,6 +243,20 @@ def main() -> None:
                         "prop nobody has gets improvised.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--csv", type=Path, default=None)
+    p.add_argument("--spots", action="store_true",
+                   help="name the exact spot for every prop, in pixels of the camera frame, "
+                        "sampled over the quad the arm was actually pushed to. Naming a cell "
+                        "leaves the place inside it to whoever is staging, and last time they "
+                        "chose the middle every time: every target landed inside 31%% of the "
+                        "crop while 43%% is reachable, and a 61 mm band under the arm was "
+                        "never used once.")
+    p.add_argument("--eval-frac", type=float, default=0.15,
+                   help="fraction of rows marked split=eval. Recorded in the same session, "
+                        "under the same conditions, and held out of training -- which is the "
+                        "only way an episode-level generalization number means anything. The "
+                        "last round had none and its held-out set was 90%% training data.")
+    p.add_argument("--second-object", action="store_true",
+                   help="[pick_two_in_order] name a second object and its spot")
     a = p.parse_args()
 
     task = load_task(a.config, a.task)
@@ -202,7 +328,13 @@ def main() -> None:
                     free_c = [c for c in CELLS if c not in taken] or \
                              [c for c in CELLS if c != f"{con}-{con_row}"]
                     other_con = f"{alt}@{rng.choice(free_c)}"
-                rows.append({"variant": v, "object_zone": obj, "object_row": obj_row,
+                second = ""
+                if a.second_object:
+                    # The second object comes from the distractors, so the mat holds exactly
+                    # what the first task's mat holds and only the sentence is longer.
+                    second = picked[0] if picked else (others[0] if others else "")
+                rows.append({"variant": v, "object2": second,
+                             "object_zone": obj, "object_row": obj_row,
                              "container_zone": con, "container_row": con_row,
                              "route": f"{obj}->{con}", "other_container": other_con,
                              "distractors": "; ".join(
@@ -210,9 +342,40 @@ def main() -> None:
                              "lighting": a.lighting[(k + g) % len(a.lighting)],
                              "start_nudge": rng.choice(NUDGES)})
     rng.shuffle(rows)                      # order of recording only; the design is already set
-    order = ["variant", "episode", "object_zone", "object_row", "container_zone",
-             "container_row", "route", "other_container", "distractors", "lighting",
-             "start_nudge"]
+    # Spots, and the split. Both are decided after the shuffle so neither correlates with
+    # anything the design balanced.
+    poly, crop = reachable()
+    if a.spots and poly:
+        pts = spots(poly, rng, len(rows) * 3)
+        k = 0
+        for r in rows:
+            # The target first, then a bowl far enough from it to get the jaws round, then the
+            # distractors anywhere else that is not on top of either.
+            tgt = pts[k % len(pts)]; k += 1
+            for _ in range(40):
+                bowl = pts[k % len(pts)]; k += 1
+                if far_enough(tgt, bowl, MIN_TARGET_BOWL_MM):
+                    break
+            r["target_xy"] = f"{tgt[0]},{tgt[1]}"
+            r["container_xy"] = f"{bowl[0]},{bowl[1]}"
+            # Keep the cell columns honest: they now describe the spot, not the other way round.
+            r["object_zone"], r["object_row"] = cell_of(tgt, crop).split("-")
+            r["container_zone"], r["container_row"] = cell_of(bowl, crop).split("-")
+            r["route"] = f"{r['object_zone']}->{r['container_zone']}"
+    elif a.spots:
+        raise SystemExit(f"--spots needs the marked workspace at {FRAMING}; "
+                         f"run mark_workspace.sh first")
+    else:
+        for r in rows:
+            r["target_xy"] = r["container_xy"] = ""
+
+    n_eval = int(round(len(rows) * a.eval_frac))
+    for i, r in enumerate(rows):
+        r["split"] = "eval" if i < n_eval else "train"
+
+    order = ["variant", "object2", "episode", "split", "object_zone", "object_row",
+             "container_zone", "container_row", "target_xy", "container_xy",
+             "route", "other_container", "distractors", "lighting", "start_nudge"]
 
     # A fingerprint of the plan, carried on every row and copied into each episode's config.
     # Row numbers only mean something within one sheet: regenerate it and row 8 is a different
