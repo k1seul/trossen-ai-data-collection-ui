@@ -2334,6 +2334,9 @@ class MainWindow(QMainWindow):
         # What the live check compares against. Empty means "nothing to verify", which is the
         # honest state without a sheet rather than a pass.
         self._gate_scene = self.scene_from_row(row) if row else []
+        # The row itself, for the live view: it carries the spots, which the scene list -- a
+        # list of objects and cells -- has no room for.
+        self._gate_row = dict(row) if row else {}
         # Before anything is drawn: the sentence has to name the prop the sheet is about to ask
         # for, and the operator has to be able to read the one that will actually be recorded.
         instruction = self.sync_instruction_to_staging(row) if row else \
@@ -2693,6 +2696,36 @@ class MainWindow(QMainWindow):
             cv2.putText(vis, f"{p['object']} {p['zone']}",
                         (int(p["x"]) - 46, int(p["y"]) - 16),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, colour, 1)
+        # Where the sheet says each thing goes, when it names a spot rather than a cell.
+        #
+        # This is the whole point of the coordinate sheets. A cell name leaves the place inside
+        # it to whoever is staging, and last round they chose the middle every time: every
+        # target in 109 episodes landed inside 31% of the crop while 43% is reachable, and a
+        # 61 mm band under the arm was never used once. A crosshair is a place; "L-far" is not.
+        row = getattr(self, "_gate_row", None) or {}
+        for key, what, col in (("target_xy", "TARGET", (80, 220, 255)),
+                               ("container_xy", "BOWL", (120, 200, 120))):
+            spec = (row.get(key) or "").strip()
+            if not spec:
+                continue
+            try:
+                gx, gy = (float(v) for v in spec.split(","))
+            except ValueError:
+                continue
+            gx, gy = int(gx), int(gy)
+            cv2.circle(vis, (gx, gy), 26, (0, 0, 0), 6)
+            cv2.circle(vis, (gx, gy), 26, col, 3)
+            for dx, dy in ((1, 0), (0, 1)):
+                cv2.line(vis, (gx - 38 * dx, gy - 38 * dy), (gx + 38 * dx, gy + 38 * dy),
+                         (0, 0, 0), 6)
+                cv2.line(vis, (gx - 38 * dx, gy - 38 * dy), (gx + 38 * dx, gy + 38 * dy),
+                         col, 2)
+            (tw, th), _ = cv2.getTextSize(what, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            tx = max(4, min(gx - tw // 2, vis.shape[1] - tw - 4))
+            ty = max(th + 44, gy - 44)
+            cv2.rectangle(vis, (tx - 6, ty - th - 6), (tx + tw + 6, ty + 8), (0, 0, 0), -1)
+            cv2.putText(vis, what, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2)
+
         vis = np.ascontiguousarray(framing_utils.draw_outside(vis, strays))
         h, w = vis.shape[:2]
         img = QImage(vis.data, w, h, 3 * w, QImage.Format_BGR888).copy()

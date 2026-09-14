@@ -255,6 +255,16 @@ def main() -> None:
                         "under the same conditions, and held out of training -- which is the "
                         "only way an episode-level generalization number means anything. The "
                         "last round had none and its held-out set was 90%% training data.")
+    p.add_argument("--per-object", type=int, default=None,
+                   help="aim for this many episodes of EACH object once what is already "
+                        "recorded is counted, instead of a flat number each. Five new props "
+                        "beside six that already have thirty episodes would otherwise get "
+                        "twelve apiece, and 'the policy cannot handle the new objects' would "
+                        "be a statement about how much data they got.")
+    p.add_argument("--recorded", type=Path,
+                   default=Path.home() / ".trossen" / "trossen_ai_data_collection" / "plan"
+                   / "episodes",
+                   help="[--per-object] where the already-recorded episode configs live")
     p.add_argument("--second-object", action="store_true",
                    help="[pick_two_in_order] name a second object and its spot")
     a = p.parse_args()
@@ -272,6 +282,20 @@ def main() -> None:
                          f"  Either put them out or pass --props with what is actually there.")
     rng = random.Random(a.seed)
     rs = routes()
+
+    # How many of each object are already in the can, so the sheet can level them up.
+    already: dict = {}
+    if a.per_object:
+        for q in sorted(Path(a.recorded).glob("*.json")):
+            try:
+                m = json.loads(q.read_text())
+            except ValueError:
+                continue
+            t = next((x for x in m.get("scene", []) if x.get("role") == "target"), None)
+            if t:
+                already[t["object"]] = already.get(t["object"], 0) + 1
+        print(f"\nalready recorded: " + ", ".join(
+            f"{k} {v}" for k, v in sorted(already.items())) or "(nothing)")
 
     # Stratify rather than shuffle and hope: assign lighting round-robin WITHIN each
     # (object, route) group, so every route gets an equal share of every condition by
@@ -291,7 +315,14 @@ def main() -> None:
             # one lighting condition while the sheet's totals looked perfectly even. Summing
             # the two indices makes the phase alternate along both.
             g = vi + ri
-            for k in range(a.episodes):
+            # With --per-object the count is what this object still needs, spread over the
+            # routes; without it, the flat number per (object, route) as before.
+            if a.per_object:
+                need = max(0, a.per_object - already.get(target_object(v), 0))
+                n_here = need // len(rs) + (1 if ri < need % len(rs) else 0)
+            else:
+                n_here = a.episodes
+            for k in range(n_here):
                 # Exclude the target by the PHYSICAL PROP, not the sentence: with the
                 # container named in the instruction, "red block -> bowl" and "red block ->
                 # pot" are different variants and the same block, so comparing sentences would
@@ -393,8 +424,9 @@ def main() -> None:
         r["episode"] = i
     rows = [{k: r[k] for k in order} for r in rows]
 
-    print(f"\n{a.task}: {len(variants)} objects x {len(rs)} routes x {a.episodes} = "
-          f"{len(rows)} episodes")
+    print(f"\n{a.task}: {len(variants)} objects, {len(rows)} episodes"
+          + (f" (levelling every object to {a.per_object})" if a.per_object
+             else f" = {len(rs)} routes x {a.episodes}"))
     print(f"routes: {', '.join(f'{o}->{c}' for o, c in rs)}  (all recorded; hold some out "
           f"later, on the data)")
     print(f"zones: L / C / R across the mat, boundaries at -0.22 and +0.22 rad shoulder\n")
