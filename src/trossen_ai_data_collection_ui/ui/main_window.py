@@ -808,7 +808,8 @@ class MainWindow(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle(title)  # Set the title of the dialog.
         dialog.setWindowModality(Qt.ApplicationModal)  # Make the dialog modal.
-        dialog.resize(800, 600)  # Set the dialog size.
+        _em = dialog.fontMetrics().averageCharWidth() or 8
+        dialog.resize(max(800, _em * 95), max(600, dialog.fontMetrics().height() * 28))
 
         # Create layout and widgets.
         layout = QVBoxLayout(dialog)
@@ -926,7 +927,8 @@ class MainWindow(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("New Task")
         dialog.setWindowModality(Qt.ApplicationModal)
-        dialog.resize(520, 560)
+        _em = dialog.fontMetrics().averageCharWidth() or 8
+        dialog.resize(max(520, _em * 62), max(560, dialog.fontMetrics().height() * 26))
 
         layout = QVBoxLayout(dialog)
         form = QFormLayout()
@@ -954,7 +956,7 @@ class MainWindow(QMainWindow):
         objects_edit.setPlaceholderText(
             "Optional: one object/variant per line, e.g.\nred block\nblue block"
         )
-        objects_edit.setFixedHeight(90)
+        objects_edit.setFixedHeight(max(90, objects_edit.fontMetrics().height() * 5))
         form.addRow("Objects / variants:", objects_edit)
 
         episode_length_spin = QSpinBox(dialog)
@@ -2358,7 +2360,7 @@ class MainWindow(QMainWindow):
                                   "and start when ready.", dialog))
         else:
             head = QLabel(f"Episode {self.staging_idx + 1} of {len(self.staging_rows)}", dialog)
-            head.setStyleSheet("font-size: 15px; font-weight: bold;")
+            head.setStyleSheet(self._rel_pt(head, 1.35) + " font-weight: bold;")
             left.addWidget(head)
             # The object lives here, not on the main window. This dialog is modal, so while
             # it is open the combobox behind it cannot be reached -- and this is the moment the
@@ -2495,12 +2497,12 @@ class MainWindow(QMainWindow):
             # on it that has to stay large.
             learn = QHBoxLayout()
             lab = QLabel("learn light:", dialog)
-            lab.setStyleSheet("color: #777; font-size: 11px;")
+            lab.setStyleSheet("color: #777; " + self._rel_pt(lab, 0.95))
             learn.addWidget(lab)
             for name in ("A: overheads only", "B: overheads + sub lamp"):
                 b = QPushButton(name.split(":")[0], dialog)
                 b.setToolTip(f"Record what the mat looks like right now as '{name}'")
-                b.setFixedWidth(34)
+                b.setFixedWidth(max(34, b.fontMetrics().horizontalAdvance("BB") + 18))
                 b.setFocusPolicy(Qt.NoFocus)     # so Space cannot reach it
                 b.clicked.connect(lambda _=False, n=name: self.learn_lighting(n))
                 learn.addWidget(b)
@@ -2530,14 +2532,19 @@ class MainWindow(QMainWindow):
         # part of this dialog that has to stay big. Cap it and let the text wrap.
         panel = QWidget(dialog)
         panel.setLayout(left)
-        panel.setMaximumWidth(400)
-        panel.setMinimumWidth(320)
+        # In characters, not pixels. These were 400 and 320 flat, which is a sensible checklist
+        # at the default font and a column of two words per line once the desktop's scale is
+        # raised -- the text does not shrink to fit a cap that was written for a different one.
+        em = dialog.fontMetrics().averageCharWidth() or 8
+        panel.setMaximumWidth(int(em * 50))
+        panel.setMinimumWidth(int(em * 40))
         outer.addWidget(panel, 0)
 
         self.gate_preview = QLabel(dialog)
         # Not a minimum: a minimum plus the checklist can make the dialog wider than the
         # screen, which is another way for it to end up somewhere nobody can see.
-        self.gate_preview.setMinimumSize(320, 240)
+        _pm = dialog.fontMetrics().height()
+        self.gate_preview.setMinimumSize(max(320, _pm * 20), max(240, _pm * 15))
         outer.addWidget(self.gate_preview, 1)
 
         # The camera keeps running while the gate is up, which is the point: the scene is being
@@ -2575,7 +2582,11 @@ class MainWindow(QMainWindow):
         screen = QApplication.primaryScreen()
         if screen is not None:
             avail = screen.availableGeometry()
-            dialog.resize(min(1180, avail.width() - 80), min(760, avail.height() - 80))
+            # Room for the checklist at whatever size its text actually is, and never more
+            # than the screen. A flat 1180x760 left the panel clipped once the font grew.
+            _w = max(1180, int(dialog.fontMetrics().averageCharWidth() * 50) + 760)
+            _h = max(760, dialog.fontMetrics().height() * 34)
+            dialog.resize(min(_w, avail.width() - 80), min(_h, avail.height() - 80))
             dialog.move(avail.center() - dialog.rect().center())
         dialog.show()
         dialog.raise_()
@@ -2660,6 +2671,20 @@ class MainWindow(QMainWindow):
                     + ("" if d >= 2.0 else " -- too close for the camera to tell apart"))
         logger.info(msg)
         self.set_logs(msg, clear=False)
+
+    @staticmethod
+    def _rel_pt(widget, factor: float) -> str:
+        """A font size RELATIVE to whatever the desktop is set to, as a stylesheet fragment.
+
+        These were written as `font-size: 11px` and friends. A pixel size does not move when
+        the desktop's scale does, so raising it grew every other widget and left these four
+        stranded at their original size -- which is most of what "the fonts went wrong" looks
+        like.
+        """
+        base = widget.font().pointSizeF()
+        if base <= 0:                       # a pixel-sized font has no point size
+            base = max(8.0, widget.fontMetrics().height() * 0.75)
+        return f"font-size: {max(7.0, base * factor):.1f}pt;"
 
     def _refresh_setup_gate(self) -> None:
         """Live camera in the gate: the crop, and anything that has fallen outside it."""
@@ -2774,11 +2799,13 @@ class MainWindow(QMainWindow):
         if ok and pose_ok:
             self.gate_status.setText("Scene and start pose match the staging row.\n" + body)
             self.gate_status.setStyleSheet(
-                "color: #2e7d32; font-family: monospace; font-size: 11px;")
+                "color: #2e7d32; font-family: monospace; "
+                + self._rel_pt(self.gate_status, 0.95))
         else:
             self.gate_status.setText("Scene does NOT match the staging row:\n" + body)
             self.gate_status.setStyleSheet("color: #c62828; font-family: monospace; "
-                                           "font-size: 11px; font-weight: bold;")
+                                           + self._rel_pt(self.gate_status, 0.95)
+                                           + " font-weight: bold;")
 
     def adopt_camera_framing(self, rgb) -> bool:
         """Re-derive the crop for where the camera is now, and start using it.
