@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -484,6 +485,7 @@ class MainWindow(QMainWindow):
         logger.info("Initializing MainWindow")
         self.ui = Ui_MainWindow()  # Initialize the UI.
         self.ui.setupUi(self)  # Set up the UI layout and widgets.
+        self._fit_minimums_to_screen()
 
         self.log_signal.connect(self.set_logs_slot)
         self.setup_gate_signal.connect(self.show_setup_gate)
@@ -667,7 +669,10 @@ class MainWindow(QMainWindow):
         # anyone remembers, so it gets a button next to the other hardware ones rather than
         # living only on a shortcut. Added here instead of in the generated resources/app.py,
         # which is regenerated from the .ui file and would lose it.
-        self.pushButton_checkframing = QPushButton("Check Camera Framing", self)
+        # Short, because the row it sits in is narrow and a button whose text is cut in
+        # the middle reads as a different button. The wording is in the tooltip.
+        self.pushButton_checkframing = QPushButton("FRAMING", self)
+        self.pushButton_checkframing.setToolTip("Check camera framing")
         self.pushButton_checkframing.setFont(self.ui.pushButton_resetcameras.font())
         self.pushButton_checkframing.setSizePolicy(
             self.ui.pushButton_resetcameras.sizePolicy()
@@ -2671,6 +2676,53 @@ class MainWindow(QMainWindow):
                     + ("" if d >= 2.0 else " -- too close for the camera to tell apart"))
         logger.info(msg)
         self.set_logs(msg, clear=False)
+
+    def _fit_minimums_to_screen(self) -> None:
+        """Let the window be as narrow as the screen it is on.
+
+        resources/app.py is Qt Designer output and carries fixed minimums -- the log browser
+        alone insists on 670 px -- which add up along the top row to a window that will not go
+        below 2116 px wide, at any font size. That was invisible while the desktop ran at a
+        scale where the screen reported more logical pixels than that. Raise the scale and the
+        screen reports 1854, the window cannot shrink to fit, and its right-hand end is off the
+        edge with no scrollbar to reach it.
+
+        The generated file is vendor code and gets regenerated, so nothing here edits it: the
+        minimums are relaxed at runtime, once, straight after setupUi. Widgets keep whatever
+        space the layout can give them; this only stops them demanding more than there is.
+        """
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        cap = max(160, int(avail.width() * 0.30))
+        for child in self.findChildren(QWidget):
+            if child.minimumWidth() > cap:
+                child.setMinimumWidth(cap)
+            # A long label's own size hint binds as hard as an explicit minimum, and the
+            # buttons along that row carry whole sentences.
+            if isinstance(child, (QPushButton, QLabel, QComboBox)) and \
+                    child.minimumSizeHint().width() > cap:
+                child.setSizePolicy(QSizePolicy.Ignored,
+                                    child.sizePolicy().verticalPolicy())
+        self.setMinimumSize(0, 0)
+
+        # Two labels in the top row are longer than the row can ever give them, so they came
+        # out as "/ARE RESET CA" and ":k Camera Fram" -- a button whose text is cut in the
+        # middle is worse than a short one, because it reads as a different button. The full
+        # wording moves to the tooltip rather than being lost.
+        # A heading that does not fit should fold, not lose its last letters: "EPISODE
+        # PROGRESS" was rendering as "EPISODE PROGRES", which looks like a typo in the
+        # application rather than a layout that ran out of room.
+        for lab in self.findChildren(QLabel):
+            if " " in (lab.text() or "") and not lab.wordWrap():
+                lab.setWordWrap(True)
+
+        for name, short in (("pushButton_resetcameras", "RESET CAM"),):
+            b = getattr(self.ui, name, None) or getattr(self, name, None)
+            if b is not None and b.text() != short:
+                b.setToolTip(b.toolTip() or b.text())
+                b.setText(short)
 
     @staticmethod
     def _rel_pt(widget, factor: float) -> str:
