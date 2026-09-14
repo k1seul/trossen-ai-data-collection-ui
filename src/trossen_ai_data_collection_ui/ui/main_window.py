@@ -18,6 +18,7 @@ from typing import (
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import (
+    QFont,
     QAction,
     QImage,
     QKeySequence,
@@ -2706,6 +2707,63 @@ class MainWindow(QMainWindow):
                 child.setSizePolicy(QSizePolicy.Ignored,
                                     child.sizePolicy().verticalPolicy())
         self.setMinimumSize(0, 0)
+
+        # The camera view is the thing being looked at while a scene is staged, and it was
+        # getting less of the window than the controls beside it: 842 px against 939, because
+        # the top-level QHBoxLayout gave both a stretch of 0 and the controls simply asked for
+        # more. Two to one the other way, so the picture grows with the window and the panel
+        # takes what it needs.
+        central = self.centralWidget()
+        lay = central.layout() if central is not None else None
+        if lay is not None and lay.count() >= 3:
+            lay.setStretch(0, 2)            # camera
+            lay.setStretch(2, 1)            # controls
+
+        # And the controls' own font: at a raised desktop scale their text is what makes that
+        # column wide in the first place. Held to 11 pt here, so the scale still governs
+        # everything else -- dialogs, the setup gate, the checklist -- without the panel eating
+        # the picture.
+        panel = lay.itemAt(2).layout() if lay is not None and lay.count() >= 3 else None
+        base = self.font()
+        if panel is not None and base.pointSizeF() > 11.0:
+            capped = QFont(base)
+            capped.setPointSizeF(11.0)
+
+            def _apply(layout):
+                """Down through nested layouts: most of this panel's items are layouts, not
+                widgets, so a single pass over itemAt().widget() reaches almost nothing."""
+                for i in range(layout.count()):
+                    it = layout.itemAt(i)
+                    wd, lz = it.widget(), it.layout()
+                    if wd is not None:
+                        wd.setFont(capped)
+                        for kid in wd.findChildren(QWidget):
+                            kid.setFont(capped)
+                    elif lz is not None:
+                        _apply(lz)
+
+            _apply(panel)
+
+        # Let the capped minimums go entirely: capping them was only ever a way to stop a
+        # widget demanding the screen, and by here the layout can work out its own. Outside the
+        # font branch, or a small desktop font leaves the log browser pinned at the cap and the
+        # window comes out WIDER at 9 pt than at 20.
+        for wd in self.findChildren(QWidget):
+            if wd.minimumWidth() >= cap:
+                wd.setMinimumWidth(0)
+        self.ui.textBrowser_log.setMinimumWidth(0)
+
+        # The six session buttons each insisted on 150 px, which is 939 for the row and the
+        # reason the control column would not give the camera any of the window however the
+        # stretch was set. Their text is already broken into lines, so what they actually need
+        # is the longest WORD, not a number picked at some other font size.
+        for b in self.findChildren(QPushButton):
+            if "\n" not in (b.text() or ""):
+                continue
+            need = max(b.fontMetrics().horizontalAdvance(word)
+                       for word in b.text().split("\n")) + 22
+            if b.minimumWidth() > need:
+                b.setMinimumWidth(int(need))
 
         # Two labels in the top row are longer than the row can ever give them, so they came
         # out as "/ARE RESET CA" and ":k Camera Fram" -- a button whose text is cut in the
