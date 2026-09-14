@@ -310,7 +310,11 @@ def main() -> None:
     rng = random.Random(a.seed)
     rs = routes()
 
-    # How many of each object are already in the can, so the sheet can level them up.
+    # How many of each object are already in the can FOR THIS TASK, so the sheet can level them
+    # up. Counting every task's episodes asked a new task to level objects that already have
+    # twenty episodes of a DIFFERENT task, and produced a sheet of zero rows. The episode
+    # configs carry the task for exactly this reason, and the collection UI's own resume point
+    # already keys on it.
     already: dict = {}
     if a.per_object:
         for q in sorted(Path(a.recorded).glob("*.json")):
@@ -318,11 +322,13 @@ def main() -> None:
                 m = json.loads(q.read_text())
             except ValueError:
                 continue
+            if m.get("task") != a.task:
+                continue
             t = next((x for x in m.get("scene", []) if x.get("role") == "target"), None)
             if t:
                 already[t["object"]] = already.get(t["object"], 0) + 1
-        print(f"\nalready recorded: " + ", ".join(
-            f"{k} {v}" for k, v in sorted(already.items())) or "(nothing)")
+        print(f"\nalready recorded for {a.task}: " + (", ".join(
+            f"{k} {v}" for k, v in sorted(already.items())) or "(nothing)"))
 
     # Stratify rather than shuffle and hope: assign lighting round-robin WITHIN each
     # (object, route) group, so every route gets an equal share of every condition by
@@ -330,6 +336,7 @@ def main() -> None:
     # lighting and route, which would have made an unseen-route split partly an
     # unseen-lighting split -- the exact entanglement this sheet exists to prevent.
     rows = []
+    second_count = {o: 0 for o in props}
     # Counts groups so each starts the two-level axes on a different phase. Round-robin from
     # zero every time is only balanced when the group size is a multiple of the number of
     # levels: at three episodes per group it gave lighting 2:1 and depth 2:1, quietly, in a
@@ -363,6 +370,14 @@ def main() -> None:
                 others = [p for p in props if p != me]
                 rng.shuffle(others)
                 picked = others[: a.distractors]
+                if a.second_object and others:
+                    # Which object is picked SECOND has to come out as level as which is picked
+                    # first. Taking whatever the distractor shuffle put in front gave one object
+                    # fifteen second-picks and another one, and the second pick is the half of
+                    # this task that tests whether the policy can tell which sub-task it is in.
+                    nxt = min(others, key=lambda o: (second_count[o], others.index(o)))
+                    second_count[nxt] += 1
+                    picked = [nxt] + [o for o in picked if o != nxt][: max(0, a.distractors - 1)]
 
                 # Alternate depth within each (object, route) group rather than sampling it,
                 # for the same reason lighting is stratified: a shuffle left lighting 0.46
@@ -451,6 +466,8 @@ def main() -> None:
             try:
                 m = json.loads(q.read_text())
             except ValueError:
+                continue
+            if m.get("task") != a.task:
                 continue
             t = next((x for x in m.get("scene", []) if x.get("role") == "target"), None)
             c = next((x for x in m.get("scene", []) if x.get("role") == "container"), None)

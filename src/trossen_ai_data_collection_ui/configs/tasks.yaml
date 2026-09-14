@@ -1,14 +1,3 @@
-# NOT the file the running application reads.
-#
-# The UI loads ~/.trossen/trossen_ai_data_collection/configs/tasks.yaml -- a persistent copy it
-# seeds from this one on first run and never refreshes. Editing this file alone changes nothing,
-# and the symptom is specific and misleading: the setup gate reports "This staging sheet is for
-# a different task", because the sheet names an object the stale copy has never heard of.
-#
-# After changing anything here:
-#     cp src/trossen_ai_data_collection_ui/configs/tasks.yaml \
-#        ~/.trossen/trossen_ai_data_collection/configs/tasks.yaml
-#
 tasks:
   # ONE block per task. To add another: copy this block, change task_name -- which is also the
   # HuggingFace dataset the episodes are written to -- change task_description, and list its
@@ -105,6 +94,41 @@ tasks:
   robot_model: trossen_ai_solo
   task_description: Pick up the {object} and place it in the bowl, then pick up the {object2}
     and place it in the bowl.
+  task_objects: *trained
+  props: *trained
+  held_out_objects:
+  - yellow block
+  - green tape roll
+  - strawberry
+  episode_length_s: 90
+  warmup_time_s: 10
+  reset_time_s: 30
+  long_reset_interval: 10
+  long_reset_time_s: 60
+  hf_user: k1seul
+  fps: 30
+  display_fps: 30
+  push_to_hub: true
+  play_sounds: true
+  disable_active_ui_updates: false
+  save_interval: 1
+
+# The pot task exists for a reason the other two do not serve. The vision arm is trained to
+# forecast the prefix patch tokens 0.8 s ahead, and on this mat that target is 72% the arm's own
+# position -- which the action chunk already states -- and 5% of the image is everything else.
+# Its auxiliary objective is close to redundant, which is a concrete candidate for why it shows
+# no benefit here while the paper reports one on LIBERO, whose tasks open drawers and cabinets.
+#
+# Taking a lid off changes a large, structured part of the image in a way proprioception does
+# not predict. Measure it after collecting, with real_robot/aux_signal.sh: if the world's share
+# of the forecast rises from 13 patches towards 40, the vision arm gets its first fair test.
+#
+# The pot is already detected by hue (POT_HUE in framing.py), so the setup gate works. The LID
+# is not modelled anywhere: park it outside the crop once it is off, so it cannot be mistaken
+# for a prop and cannot occupy a staging cell.
+- task_name: open_pot_and_place
+  robot_model: trossen_ai_solo
+  task_description: Open the pot and place the {object} in it. Do not touch the other items.
   task_objects: *trained
   props: *trained
   held_out_objects:
