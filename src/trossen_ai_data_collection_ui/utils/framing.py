@@ -465,7 +465,7 @@ def verify_scene(expected: list[dict], rgb: np.ndarray,
             kind = "tape roll" if "tape" in name else ("block" if "block" in name else None)
             colour = next((c for c in PROP_HUES if c in name), None)
             if kind is None or colour is None:
-                # Not something the colour gate can name -- a cucumber, a banana, a radish.
+                # Not something the colour gate can name -- a green bean, a banana, a radish.
                 # Counted, because it will still have been DETECTED, as a green block or a
                 # yellow one, and those detections must not then be reported as objects nobody
                 # asked for. Without this every scene holding a fruit failed the gate with a

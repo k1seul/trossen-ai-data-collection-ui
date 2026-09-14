@@ -464,9 +464,23 @@ def main() -> None:
                           "container_row": crow or "far", "route": f"{oz}->{cz}",
                           "lighting": lg if lg in a.lighting else a.lighting[0]})
 
+    # Spread the eval episodes THROUGH the session, not across its first rows.
+    #
+    # Taking the first n after the shuffle put all twenty at the start, which is the least
+    # practised the operator will be all day -- and that practice is measurable: within a
+    # single object, later episodes run shorter, rho -0.27, and over the whole set 8.9 s for
+    # the first thirty against 7.5 s for the last thirty (p=0.0005). An eval set recorded
+    # entirely before that improvement is systematically clumsier than the training set, and a
+    # policy scored on it would be scored against the operator's worst hour.
+    #
+    # Every k-th row instead, so the two splits sit in the same part of the learning curve.
     n_eval = int(round(len(rows) * a.eval_frac))
-    for i, r in enumerate(rows):
-        r["split"] = "eval" if i < n_eval else "train"
+    for r in rows:
+        r["split"] = "train"
+    if n_eval:
+        step = len(rows) / n_eval
+        for j in range(n_eval):
+            rows[min(len(rows) - 1, int((j + 0.5) * step))]["split"] = "eval"
 
     order = ["variant", "object2", "episode", "split", "object_zone", "object_row",
              "container_zone", "container_row", "target_xy", "container_xy",
