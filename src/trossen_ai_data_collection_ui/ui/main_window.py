@@ -2838,6 +2838,7 @@ class MainWindow(QMainWindow):
         # target in 109 episodes landed inside 31% of the crop while 43% is reachable, and a
         # 61 mm band under the arm was never used once. A crosshair is a place; "L-far" is not.
         row = getattr(self, "_gate_row", None) or {}
+        things = framing_utils.things_on_the_mat(frame, crop, skip_top=top) if row else []
         for key, what, col in (("target_xy", "TARGET", (80, 220, 255)),
                                ("container_xy", "BOWL", (120, 200, 120))):
             spec = (row.get(key) or "").strip()
@@ -2855,6 +2856,16 @@ class MainWindow(QMainWindow):
                          (0, 0, 0), 6)
                 cv2.line(vis, (gx - 38 * dx, gy - 38 * dy), (gx + 38 * dx, gy + 38 * dy),
                          col, 2)
+            # Is anything actually there? By difference from the empty mat, so it works for a
+            # white radish on a white table as well as for a red block -- the colour gate can
+            # find one of those and not the other, and "put it on the crosshair" is the same
+            # instruction either way.
+            near = [t for t in things
+                    if t["inside_crop"]
+                    and (t["x"] - gx) ** 2 + (t["y"] - gy) ** 2 <= 42 ** 2]
+            if near:
+                col = (90, 220, 90)
+                what = f"{what} \u2713"
             (tw, th), _ = cv2.getTextSize(what, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             tx = max(4, min(gx - tw // 2, vis.shape[1] - tw - 4))
             ty = max(th + 44, gy - 44)

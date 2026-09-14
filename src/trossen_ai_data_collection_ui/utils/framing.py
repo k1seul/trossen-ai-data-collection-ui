@@ -773,3 +773,76 @@ def selftest() -> None:
 
 if __name__ == "__main__":
     selftest()
+
+
+# ---------------------------------------------------------------- finding things by absence
+
+# Where the empty-mat estimate is kept. Built from the recorded start frames rather than shot:
+# objects sit somewhere different in every episode, so the per-pixel median over a hundred of
+# them IS the table, and it costs no bench time to make.
+BACKGROUND = Path.home() / ".trossen" / "trossen_ai_data_collection" / "framing" / \
+    "background.png"
+
+# Grey levels of difference that count as "something is there". Measured against the median
+# background: the mat's own frame-to-frame noise sits around 8, a shadow around 18, and a prop
+# well past 40.
+BG_DELTA = 28
+
+# A blob smaller than this is noise or a shadow edge; larger than this is the arm, which enters
+# the top of the crop and is not a prop. Props measured 200-3200 px this way -- much larger than
+# the colour masks give, because this catches the whole object rather than its saturated part.
+BG_MIN_AREA, BG_MAX_AREA = 200, 4000
+
+
+def build_background(frames, out: Path = BACKGROUND) -> "np.ndarray":
+    """The empty mat, as the median of frames whose objects were somewhere different each time."""
+    bg = np.median(np.stack(list(frames)), 0).astype(np.uint8)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out), bg)
+    return bg
+
+
+def things_on_the_mat(rgb: np.ndarray, crop, skip_top: int = 0,
+                      background: "np.ndarray | None" = None,
+                      delta: int = BG_DELTA) -> list[dict]:
+    """Everything sitting on the mat, WITHOUT having to know what colour it is.
+
+    identify_props asks four hue ranges what they can see, which was right while the bench held
+    four colours of block and tape. It cannot find a white radish on a white mat at all, and it
+    reports a green bean, a green pepper and a green block by the same name. Both are properties
+    of the question, not of the detector.
+
+    Asking what has CHANGED from the empty mat finds all of them: a radish differs from the
+    table even though neither is a colour the gate knows. It gives position and size and not
+    identity -- which is the right division of labour, because position is what the staging
+    check needs and identity is what the operator can supply by eye.
+
+    Returns [{x, y, area, w, h, inside_crop}], largest first.
+    """
+    if background is None:
+        if not Path(BACKGROUND).exists():
+            return []
+        background = cv2.imread(str(BACKGROUND))[:, :, ::-1]
+    a = cv2.GaussianBlur(np.ascontiguousarray(rgb), (5, 5), 0)
+    b = cv2.GaussianBlur(np.ascontiguousarray(background), (5, 5), 0)
+    d = cv2.cvtColor(cv2.absdiff(a, b), cv2.COLOR_RGB2GRAY)
+    _, m = cv2.threshold(d, delta, 255, cv2.THRESH_BINARY)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    if skip_top:
+        m[:skip_top, :] = 0
+    out = []
+    n, _, st, ce = cv2.connectedComponentsWithStats(m, 8)
+    for i in range(1, n):
+        area = int(st[i, cv2.CC_STAT_AREA])
+        if not (BG_MIN_AREA <= area <= BG_MAX_AREA):
+            continue
+        cx, cy = float(ce[i][0]), float(ce[i][1])
+        inside = True
+        if crop:
+            x, y, side = crop
+            inside = x <= cx <= x + side and y <= cy <= y + side
+        out.append({"x": cx, "y": cy, "area": area,
+                    "w": int(st[i, cv2.CC_STAT_WIDTH]), "h": int(st[i, cv2.CC_STAT_HEIGHT]),
+                    "inside_crop": inside})
+    return sorted(out, key=lambda q: -q["area"])
