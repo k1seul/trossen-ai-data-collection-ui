@@ -178,11 +178,28 @@ PROP_HUES = {
 }
 
 
+# How far past the crop a prop can plausibly have gone and still be a prop, and how big a blob
+# can be and still be one.
+#
+# The whole frame used to be searched at any size, so anything the colour gate matched anywhere
+# became a prop that had escaped -- a laptop screen past the right edge read as a blue block,
+# every episode, and an operator who dismisses the same false alarm twenty times stops reading
+# the real ones.
+#
+# The band alone does not fix it: the crop's right edge is 47 px from the edge of the frame, so
+# everything over there is "just outside". Size does. Measured over 159 real detections in the
+# recorded start frames, a prop is 411 px at the median and 776 at the largest; a screen or a
+# cabinet face is thousands. 1400 is comfortably above every prop ever seen and far below
+# anything that is not one.
+STRAY_BAND_PX = 70
+MAX_PROP_AREA = 1400
+
+
 def outside_crop(
     rgb: np.ndarray, crop: "tuple[int, int, int] | None", min_area: int = 220,
-    skip_top: int = 0,
+    skip_top: int = 0, band: int = STRAY_BAND_PX, max_area: int = MAX_PROP_AREA,
 ) -> list[tuple[str, int, int]]:
-    """Coloured props whose centre falls outside the window the policy sees.
+    """Coloured props whose centre falls just outside the window the policy sees.
 
     An object that drifts out of the crop mid-episode -- knocked by the gripper, or staged just
     past the edge -- makes that episode teach the policy about something it cannot see. From an
@@ -190,6 +207,9 @@ def outside_crop(
 
     Centres rather than any overlap: a prop straddling the boundary is still mostly visible, and
     flagging it every time the gripper nudges something would train the operator to ignore this.
+
+    Only within `band` of the crop, for the same reason: the point is props that have left the
+    view, not every blue thing in the room.
     """
     if not crop:
         return []
@@ -203,12 +223,16 @@ def outside_crop(
         m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         n, _, st, ce = cv2.connectedComponentsWithStats(m, 8)
         for i in range(1, n):
-            if st[i, cv2.CC_STAT_AREA] < min_area:
-                continue
+            a = st[i, cv2.CC_STAT_AREA]
+            if a < min_area or a > max_area:
+                continue                    # too small to be anything, or far too big to be a prop
             cx, cy = int(ce[i][0]), int(ce[i][1])
             if cy < skip_top:
                 continue                    # furniture above the table, never a stray prop
-            if not (x <= cx <= x + side and y <= cy <= y + side):
+            inside = x <= cx <= x + side and y <= cy <= y + side
+            near = (x - band <= cx <= x + side + band
+                    and y - band <= cy <= y + side + band)
+            if not inside and near:
                 out.append((name, cx, cy))
     return out
 
@@ -284,7 +308,11 @@ def identify_props(rgb: np.ndarray, crop: "tuple[int, int, int] | None",
         n, _, st, ce = cv2.connectedComponentsWithStats(m, 8)
         for i in range(1, n):
             area = int(st[i, cv2.CC_STAT_AREA])
-            if area < PROP_MIN_AREA:
+            # Same bound as outside_crop, for the same reason: the cabinet face at the top-left
+            # of the crop was being read as a yellow block, two pixels below skip_top, in every
+            # frame. A prop measured 411 px at the median and 776 at the largest over 159 real
+            # detections; anything past 1400 is furniture.
+            if area < PROP_MIN_AREA or area > MAX_PROP_AREA:
                 continue
             w, h = int(st[i, cv2.CC_STAT_WIDTH]), int(st[i, cv2.CC_STAT_HEIGHT])
             fill = area / max(w * h, 1)
@@ -702,10 +730,23 @@ def selftest() -> None:
     assert not bad and any(s == "missing" for s, _ in lines), lines
     assert any(s == "extra" for s, _ in lines), lines
 
-    # Furniture above the staging area is never a stray prop.
+    # Furniture above the staging area is never a stray prop. Placed just beside the crop so
+    # this tests skip_top and not the band below it.
     up = np.zeros((480, 640, 3), np.uint8)
-    cv2.rectangle(up, (20, 30), (60, 70), (220, 200, 30), -1)     # yellow, well above the table
+    cv2.rectangle(up, (80, 30), (110, 70), (220, 200, 30), -1)    # yellow, above the table
     assert outside_crop(up, crop) and not outside_crop(up, crop, skip_top=110)
+
+    # ...and something the colour gate matches far from the crop is not a prop that fell out of
+    # it. A laptop screen past the right edge was being reported as a blue block every episode.
+    x0, _, side = crop
+    # A screen or a cabinet past the edge is not a prop that fell out of the crop: too big.
+    far = np.zeros((480, 640, 3), np.uint8)
+    cv2.rectangle(far, (x0 + side + 4, 250), (639, 430), (220, 30, 30), -1)  # RGB: red
+    assert outside_crop(far, crop) == [], outside_crop(far, crop)
+    # but a prop-sized one in the same place still is.
+    near = np.zeros((480, 640, 3), np.uint8)
+    cv2.rectangle(near, (x0 + side + 10, 300), (x0 + side + 32, 322), (220, 30, 30), -1)
+    assert [n for n, _, _ in outside_crop(near, crop)] == ["red"], outside_crop(near, crop)
     print("framing selftest ok")
 
 
