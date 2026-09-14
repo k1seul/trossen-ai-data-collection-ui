@@ -1,3 +1,14 @@
+# NOT the file the running application reads.
+#
+# The UI loads ~/.trossen/trossen_ai_data_collection/configs/tasks.yaml -- a persistent copy it
+# seeds from this one on first run and never refreshes. Editing this file alone changes nothing,
+# and the symptom is specific and misleading: the setup gate reports "This staging sheet is for
+# a different task", because the sheet names an object the stale copy has never heard of.
+#
+# After changing anything here:
+#     cp src/trossen_ai_data_collection_ui/configs/tasks.yaml \
+#        ~/.trossen/trossen_ai_data_collection/configs/tasks.yaml
+#
 tasks:
   # ONE block per task. To add another: copy this block, change task_name -- which is also the
   # HuggingFace dataset the episodes are written to -- change task_description, and list its
