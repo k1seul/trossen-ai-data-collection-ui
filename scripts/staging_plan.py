@@ -150,6 +150,33 @@ def spots(poly, rng, n: int, *, cols: int = 6, rows: int = 4, margin=REACH_MARGI
     return out
 
 
+def spot_in_cell(poly, crop, zone: str, row: str, rng, margin=REACH_MARGIN_PX,
+                 tries: int = 400):
+    """A place inside one cell that the arm can reach, chosen anywhere in it but the middle.
+
+    The cell is the design's; this only decides where within it. Rejection sampling because the
+    cell is a rectangle and the reachable region is a hull, and their intersection has no useful
+    closed form -- with a few hundred tries it either finds one or the cell genuinely has none.
+    """
+    if not crop:
+        return None
+    x, y, side = crop
+    col = {"L": 0, "C": 1, "R": 2}.get(zone)
+    if col is None:
+        return None
+    x0 = x + side * col / 3.0
+    x1 = x + side * (col + 1) / 3.0
+    top_y = 102.0
+    mid = (max(y, top_y) + y + side) / 2.0
+    y0, y1 = (max(y, top_y), mid) if row == "far" else (mid, y + side)
+    for _ in range(tries):
+        px = rng.uniform(x0 + margin, x1 - margin)
+        py = rng.uniform(y0 + margin, y1 - margin)
+        if _inside(poly, px, py, margin):
+            return (round(px, 1), round(py, 1))
+    return None
+
+
 def far_enough(a, b, mm: float) -> bool:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 * MM_PER_PX >= mm
 
@@ -319,7 +346,12 @@ def main() -> None:
             # routes; without it, the flat number per (object, route) as before.
             if a.per_object:
                 need = max(0, a.per_object - already.get(target_object(v), 0))
-                n_here = need // len(rs) + (1 if ri < need % len(rs) else 0)
+                # Which routes get the remainder has to ROTATE with the object. Handing the
+                # leftovers to the first few routes every time meant an object needing only
+                # three episodes appeared on three routes and never the other three -- and
+                # since the container's zone comes from the route, its zone then told you
+                # which object had been named. The sheet's own checker read 1.42 of 3 levels.
+                n_here = need // len(rs) + (1 if (ri - vi) % len(rs) < need % len(rs) else 0)
             else:
                 n_here = a.episodes
             for k in range(n_here):
@@ -377,28 +409,60 @@ def main() -> None:
     # anything the design balanced.
     poly, crop = reachable()
     if a.spots and poly:
-        pts = spots(poly, rng, len(rows) * 3)
-        k = 0
+        # The spot is drawn INSIDE the cell the design already chose, never the other way
+        # round. Sampling coordinates freely and recomputing the cells from them looked
+        # equivalent and was not: it discarded every balance this generator exists to enforce
+        # -- lighting stratified within each (object, route) group, depth alternating, the
+        # container's zone independent of which object was named -- and the sheet's own checker
+        # caught all three. Worse, free coordinates produced L->L and C->C routes, and a route
+        # that stays in one column is the thing 109 episodes never did: putting it in TRAINING
+        # would quietly spend an OOD axis.
+        #
+        # What is gained is what was actually wrong: within its cell, the spot is anywhere the
+        # arm can reach rather than the middle, which is where a person puts things.
         for r in rows:
-            # The target first, then a bowl far enough from it to get the jaws round, then the
-            # distractors anywhere else that is not on top of either.
-            tgt = pts[k % len(pts)]; k += 1
-            for _ in range(40):
-                bowl = pts[k % len(pts)]; k += 1
-                if far_enough(tgt, bowl, MIN_TARGET_BOWL_MM):
+            tgt = spot_in_cell(poly, crop, r["object_zone"], r["object_row"], rng)
+            bowl = None
+            for _ in range(60):
+                cand = spot_in_cell(poly, crop, r["container_zone"], r["container_row"], rng)
+                if cand is None:
                     break
-            r["target_xy"] = f"{tgt[0]},{tgt[1]}"
-            r["container_xy"] = f"{bowl[0]},{bowl[1]}"
-            # Keep the cell columns honest: they now describe the spot, not the other way round.
-            r["object_zone"], r["object_row"] = cell_of(tgt, crop).split("-")
-            r["container_zone"], r["container_row"] = cell_of(bowl, crop).split("-")
-            r["route"] = f"{r['object_zone']}->{r['container_zone']}"
+                if tgt is None or far_enough(tgt, cand, MIN_TARGET_BOWL_MM):
+                    bowl = cand
+                    break
+            r["target_xy"] = f"{tgt[0]},{tgt[1]}" if tgt else ""
+            r["container_xy"] = f"{bowl[0]},{bowl[1]}" if bowl else ""
+        missing = sum(1 for r in rows if not r["target_xy"] or not r["container_xy"])
+        if missing:
+            print(f"\n{missing} of {len(rows)} rows have a cell with no reachable spot far "
+                  f"enough from the other -- those keep the cell name and no crosshair.")
     elif a.spots:
         raise SystemExit(f"--spots needs the marked workspace at {FRAMING}; "
                          f"run mark_workspace.sh first")
     else:
         for r in rows:
             r["target_xy"] = r["container_xy"] = ""
+
+    # What is already recorded, in the same shape as a sheet row, so the balance checks below
+    # see the dataset rather than only the new sheet.
+    prior = []
+    if a.per_object:
+        for q in sorted(Path(a.recorded).glob("*.json")):
+            try:
+                m = json.loads(q.read_text())
+            except ValueError:
+                continue
+            t = next((x for x in m.get("scene", []) if x.get("role") == "target"), None)
+            c = next((x for x in m.get("scene", []) if x.get("role") == "container"), None)
+            if not (t and c):
+                continue
+            oz, _, orow = t["zone"].partition("-")
+            cz, _, crow = c["zone"].partition("-")
+            lg = m.get("lighting") or ""
+            prior.append({"variant": t["object"], "object_zone": oz,
+                          "object_row": orow or "far", "container_zone": cz,
+                          "container_row": crow or "far", "route": f"{oz}->{cz}",
+                          "lighting": lg if lg in a.lighting else a.lighting[0]})
 
     n_eval = int(round(len(rows) * a.eval_frac))
     for i, r in enumerate(rows):
@@ -446,13 +510,13 @@ def main() -> None:
     # not entangled with another at collection time.
     print()
     _report_balance(rows, "container_zone", "variant", ZONES,
-                    "the container's zone must not hint at which object was named")
+                    "the container's zone must not hint at which object was named", prior=prior)
     _report_balance(rows, "object_row", "route", ROWS,
                     "depth must not line up with the route, or an unseen-route split would "
-                    "also be an unseen-distance split")
+                    "also be an unseen-distance split", prior=prior)
     _report_balance(rows, "lighting", "route", a.lighting,
                     "lighting must not line up with the route, or an unseen-route split would "
-                    "also be an unseen-lighting split")
+                    "also be an unseen-lighting split", prior=prior)
 
     if a.csv:
         with open(a.csv, "w", newline="") as fh:
@@ -461,9 +525,17 @@ def main() -> None:
         print(f"\nwrote {a.csv}")
 
 
-def _report_balance(rows, field, against, levels, why):
+def _report_balance(rows, field, against, levels, why, prior=()):
+    """How far apart the groups sit on this axis, over the WHOLE dataset.
+
+    prior is what has already been recorded. A top-up sheet cannot balance on its own -- an
+    object that needs three more episodes cannot cover six routes -- and judging it alone
+    reported 0.38 on a combination that comes to 0.09 once the 108 episodes already in the can
+    are counted. The thing that has to be balanced is the data the model trains on, not the
+    sheet that was printed last.
+    """
     groups = {}
-    for r in rows:
+    for r in list(prior) + list(rows):
         key = short(r[against]) if against == "variant" else r[against]
         groups.setdefault(key, []).append(levels.index(r[field]))
     means = {k: sum(v) / len(v) for k, v in groups.items()}
@@ -471,7 +543,8 @@ def _report_balance(rows, field, against, levels, why):
     # A two-level axis at spread 0.33 is a 2:1 split inside some group, which is exactly the
     # entanglement these checks exist to catch -- and 0.35 waved it through.
     ok = spread < 0.15
-    print(f"{field} vs {against}: spread {spread:.2f} of {len(levels)} levels  "
+    scope = f" (this sheet plus the {len(prior)} already recorded)" if prior else ""
+    print(f"{field} vs {against}: spread {spread:.2f} of {len(levels)} levels{scope}  "
           f"{'OK' if ok else 'TOO HIGH -- the sheet is entangled, not just unlucky'}")
     print(f"   ({why})")
 
