@@ -456,6 +456,7 @@ def verify_scene(expected: list[dict], rgb: np.ndarray,
     seen = identify_props(rgb, crop, skip_top=skip_top, exclude=containers) + containers
     unmatched = list(seen)
     lines, ok = [], True
+    unnameable = 0
     for want in expected:
         name = (want.get("object") or "").lower()
         if name in ("bowl", "pot"):
@@ -464,6 +465,12 @@ def verify_scene(expected: list[dict], rgb: np.ndarray,
             kind = "tape roll" if "tape" in name else ("block" if "block" in name else None)
             colour = next((c for c in PROP_HUES if c in name), None)
             if kind is None or colour is None:
+                # Not something the colour gate can name -- a cucumber, a banana, a radish.
+                # Counted, because it will still have been DETECTED, as a green block or a
+                # yellow one, and those detections must not then be reported as objects nobody
+                # asked for. Without this every scene holding a fruit failed the gate with a
+                # list of extras that were the fruit.
+                unnameable += 1
                 lines.append(("skip", f"{want.get('object')} -- by eye "
                                       f"(expected zone {want.get('zone')})"))
                 continue
@@ -493,6 +500,11 @@ def verify_scene(expected: list[dict], rgb: np.ndarray,
         else:
             lines.append(("missing", f"{want['object']}: not found -- should be in "
                                      f"{want['zone']}"))
+    # Two per unnameable object, not one: a fruit is rarely one colour. Corn is a yellow cob in
+    # a green husk, a radish a white body with a green top, a strawberry red with a green leaf
+    # -- each shows up as two blobs, and a one-for-one allowance left the second half of them
+    # reported as objects nobody asked for.
+    spare = unnameable * 2
     for extra in unmatched:
         if extra["kind"] == "container":
             # A container nobody asked for is usually the other one left on the mat, which
@@ -500,6 +512,15 @@ def verify_scene(expected: list[dict], rgb: np.ndarray,
             # tablecloth -- so it is reported without failing the scene.
             lines.append(("note", f"{extra['object']} seen in {extra['zone']}, "
                                   f"not part of this episode"))
+            continue
+        if spare > 0:
+            # One of the objects this scene asks for could not be named, and this is very
+            # likely it under the only name the four-colour gate has. Said out loud rather
+            # than hidden, and not counted as a fault -- but only as many times as there are
+            # unnameable objects, so a genuinely stray prop is still caught.
+            spare -= 1
+            lines.append(("note", f"{extra['object']} in {extra['zone']} -- probably one of "
+                                  f"the objects above that cannot be named by colour"))
             continue
         ok = False
         lines.append(("extra", f"{extra['object']} in {extra['zone']} is not in this episode"))
