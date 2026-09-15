@@ -1292,6 +1292,8 @@ class MainWindow(QMainWindow):
         if restored != self.selected_task:
             self.selected_task = restored
             self.refresh_episode_object_choices()
+            if hasattr(self, "staging_rows"):
+                self._load_staging_sheet()
 
     def get_task_parameters(self, task_name: str) -> dict | None:
         """
@@ -1789,6 +1791,13 @@ class MainWindow(QMainWindow):
         logger.info(f"Task selection changed to '{self.selected_task}'")
         self.set_logs(f"Selected new task: {self.selected_task}")
         self.refresh_episode_object_choices()
+        # Where to resume depends on the task: the resume point counts THIS task's episodes
+        # recorded against the sheet. It was only computed at start-up, for whichever task the
+        # combobox opens on, so choosing pick_two_in_order after launch left it at row 1 with
+        # eighteen rows already recorded -- and the next take would have re-recorded row 1.
+        # The combobox is disabled while recording, so this never moves a running session.
+        if hasattr(self, "staging_rows"):
+            self._load_staging_sheet()
 
     @staticmethod
     def _extract_object_from_instruction(template: str, instruction: str) -> str | None:
