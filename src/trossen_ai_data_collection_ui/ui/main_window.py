@@ -2853,8 +2853,15 @@ class MainWindow(QMainWindow):
         # 61 mm band under the arm was never used once. A crosshair is a place; "L-far" is not.
         row = getattr(self, "_gate_row", None) or {}
         things = framing_utils.things_on_the_mat(frame, crop, skip_top=top) if row else []
-        for key, what, col in (("target_xy", "TARGET", (80, 220, 255)),
-                               ("container_xy", "BOWL", (120, 200, 120))):
+        # A two-object row gets a crosshair per object, each named, so the operator cannot put
+        # the second object on the first one's spot: "TARGET" twice would say where, not which.
+        marks = [("target_xy", "TARGET", (80, 220, 255)),
+                 ("container_xy", "BOWL", (120, 200, 120))]
+        if (row.get("object2_xy") or "").strip():
+            marks = [("target_xy", f"1ST {row.get('variant', '')}".strip(), (80, 220, 255)),
+                     ("object2_xy", f"2ND {row.get('object2', '')}".strip(), (230, 120, 255)),
+                     ("container_xy", "BOWL", (120, 200, 120))]
+        for key, what, col in marks:
             spec = (row.get(key) or "").strip()
             if not spec:
                 continue

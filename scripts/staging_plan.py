@@ -62,6 +62,12 @@ MM_PER_PX = 25.0 / 27.0
 # 5th percentile was 128.
 MIN_TARGET_BOWL_MM = 130.0
 
+# Between the two objects of a two-object task. The jaws open to 69.6 mm, so an open finger
+# reaches about 35 mm from the centre of the object being taken; add a finger's width and half of
+# the widest prop (the pepper, 41 mm) and two objects closer than this cannot be picked one at a
+# time without the jaws striking the other.
+MIN_TWO_OBJECTS_MM = 90.0
+
 # Margin from the edge of the hand-marked reachable quad, so a prop is not half off it.
 REACH_MARGIN_PX = 18
 
@@ -436,18 +442,60 @@ def main() -> None:
         # What is gained is what was actually wrong: within its cell, the spot is anywhere the
         # arm can reach rather than the middle, which is where a person puts things.
         for r in rows:
-            tgt = spot_in_cell(poly, crop, r["object_zone"], r["object_row"], rng)
-            bowl = None
-            for _ in range(60):
-                cand = spot_in_cell(poly, crop, r["container_zone"], r["container_row"], rng)
-                if cand is None:
+            props = [d.strip() for d in r["distractors"].split(";") if "@" in d]
+            second = r.get("object2") or ""
+            mine = next((d for d in props if d.split("@", 1)[0].strip() == second), None)
+            # Cells the second object may take: the one the distractor list gave it first, then
+            # any cell nobody else holds. A cell beside the bowl's cannot keep 130 mm from the
+            # bowl inside a 136 mm cell, and that was eleven rows of a first draw with no
+            # crosshair for the second object. Moving it is free: no balance check reads where
+            # a distractor sits, only that it is not in the target's or the bowl's cell.
+            taken = {f"{r['object_zone']}-{r['object_row']}",
+                     f"{r['container_zone']}-{r['container_row']}",
+                     *(d.split("@", 1)[1].strip() for d in props if d is not mine)}
+            cells2 = ([mine.split("@", 1)[1].strip()] if mine else []) + \
+                     [c for c in CELLS if c not in taken
+                      and (not mine or c != mine.split("@", 1)[1].strip())]
+            tgt = bowl = obj2 = None
+            cell2 = None
+            # All three together, because each constrains the others: a target drawn first
+            # and fixed can leave nowhere legal for the bowl AND the second object at once.
+            for c2 in (cells2 if second else [None]):
+                for _ in range(120):
+                    t = spot_in_cell(poly, crop, r["object_zone"], r["object_row"], rng)
+                    b = spot_in_cell(poly, crop, r["container_zone"], r["container_row"], rng)
+                    if t is None or b is None or not far_enough(t, b, MIN_TARGET_BOWL_MM):
+                        continue
+                    if c2 is None:
+                        tgt, bowl = t, b
+                        break
+                    z2, row2 = c2.split("-", 1)
+                    o = spot_in_cell(poly, crop, z2, row2, rng)
+                    if (o is not None and far_enough(t, o, MIN_TWO_OBJECTS_MM)
+                            and far_enough(b, o, MIN_TARGET_BOWL_MM)):
+                        tgt, bowl, obj2, cell2 = t, b, o, c2
+                        break
+                if tgt is not None:
                     break
-                if tgt is None or far_enough(tgt, cand, MIN_TARGET_BOWL_MM):
-                    bowl = cand
-                    break
+            if tgt is None:
+                # Fall back to what the single-object sheets always did, so a row is never left
+                # with fewer crosshairs than it would have had before.
+                tgt = spot_in_cell(poly, crop, r["object_zone"], r["object_row"], rng)
+                for _ in range(60):
+                    cand = spot_in_cell(poly, crop, r["container_zone"], r["container_row"], rng)
+                    if cand is None:
+                        break
+                    if tgt is None or far_enough(tgt, cand, MIN_TARGET_BOWL_MM):
+                        bowl = cand
+                        break
+            if cell2 and mine and cell2 != mine.split("@", 1)[1].strip():
+                props = [f"{second}@{cell2}" if d is mine else d for d in props]
+                r["distractors"] = "; ".join(props)
             r["target_xy"] = f"{tgt[0]},{tgt[1]}" if tgt else ""
             r["container_xy"] = f"{bowl[0]},{bowl[1]}" if bowl else ""
-        missing = sum(1 for r in rows if not r["target_xy"] or not r["container_xy"])
+            r["object2_xy"] = f"{obj2[0]},{obj2[1]}" if obj2 else ""
+        missing = sum(1 for r in rows if not r["target_xy"] or not r["container_xy"]
+                      or (r.get("object2") and not r["object2_xy"]))
         if missing:
             print(f"\n{missing} of {len(rows)} rows have a cell with no reachable spot far "
                   f"enough from the other -- those keep the cell name and no crosshair.")
@@ -456,7 +504,7 @@ def main() -> None:
                          f"run mark_workspace.sh first")
     else:
         for r in rows:
-            r["target_xy"] = r["container_xy"] = ""
+            r["target_xy"] = r["container_xy"] = r["object2_xy"] = ""
 
     # What is already recorded, in the same shape as a sheet row, so the balance checks below
     # see the dataset rather than only the new sheet.
@@ -500,7 +548,7 @@ def main() -> None:
             rows[min(len(rows) - 1, int((j + 0.5) * step))]["split"] = "eval"
 
     order = ["variant", "object2", "episode", "split", "object_zone", "object_row",
-             "container_zone", "container_row", "target_xy", "container_xy",
+             "container_zone", "container_row", "target_xy", "container_xy", "object2_xy",
              "route", "other_container", "distractors", "lighting", "start_nudge"]
 
     # A fingerprint of the plan, carried on every row and copied into each episode's config.
