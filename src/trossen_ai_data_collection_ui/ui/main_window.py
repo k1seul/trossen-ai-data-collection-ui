@@ -3858,6 +3858,29 @@ class MainWindow(QMainWindow):
                     logger.error("refusing to record with unfilled instruction %r",
                                  episode_instruction)
                     break
+                # The object slot is a free-text combobox, and it keeps focus through a session,
+                # so a stray key goes straight into the sentence: pick_two_in_order episode 27
+                # was saved as "Pick up the yellow tape roll\ and place it...", an object no
+                # other episode names. A name that is not one of the task's objects is refused
+                # here rather than discovered in the dataset.
+                _task = self.get_task_parameters(self.selected_task) or {}
+                _obj = self.ui.comboBox_episode_object.currentText().strip()
+                _row = (self.staging_rows[self.staging_idx]
+                        if self.staging_rows and self.staging_idx < len(self.staging_rows) else {})
+                _known = set(_task.get("task_objects") or []) | \
+                    set(_task.get("held_out_objects") or []) | \
+                    {(_row.get("variant") or "").strip()} - {""}
+                if "{object}" in (_task.get("task_description") or "") and _obj not in _known:
+                    self.log_signal.emit(
+                        colored(f"NOT RECORDING -- the object box says {_obj!r}, which is not an "
+                                f"object of this task. Fix the box (the staging row asks for "
+                                f"{_row.get('variant', '?')!r}) and start again.", "red"), False)
+                    logger.error("refusing to record with unknown object %r", _obj)
+                    break
+                if _row.get("variant") and _obj != _row["variant"].strip():
+                    self.log_signal.emit(
+                        colored(f"note: recording {_obj!r} where the staging row asks for "
+                                f"{_row['variant']!r}", "yellow"), False)
                 self.log_signal.emit(
                     colored(f"recording: {episode_instruction}", "yellow"), False)
 
