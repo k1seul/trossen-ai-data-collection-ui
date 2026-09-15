@@ -101,6 +101,7 @@ tasks:
   - green tape roll
   - strawberry
   episode_length_s: 90
+  min_episode_length_s: 6   # shorter is an accidental key press; real takes run 10 s+
   warmup_time_s: 10
   reset_time_s: 30
   long_reset_interval: 10
@@ -136,6 +137,7 @@ tasks:
   - green tape roll
   - strawberry
   episode_length_s: 90
+  min_episode_length_s: 6   # shorter is an accidental key press; real takes run 10 s+
   warmup_time_s: 10
   reset_time_s: 30
   long_reset_interval: 10

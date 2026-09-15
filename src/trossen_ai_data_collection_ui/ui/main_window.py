@@ -213,6 +213,11 @@ def safe_disconnect(func):
     return wrapper
 
 
+# Shorter than this, a take is an accidental key press rather than a demonstration. The shortest
+# real episode so far is 5.3 s (pick_specific) and 10.2 s (pick_two); a task can raise its own
+# floor with min_episode_length_s in tasks.yaml.
+MIN_EPISODE_LENGTH_S = 3.0
+
 class CalibrationMenu(QDialog):
     """
     Calibration Menu for the Trossen AI Data Collection application.
@@ -3996,6 +4001,28 @@ class MainWindow(QMainWindow):
                         True,
                     )
                     self.events["finish_episode"] = False
+
+                # A take shorter than any real demonstration is a key pressed by accident, not an
+                # episode. pick_two_in_order episode 96 was saved with ONE frame -- the finish key
+                # reached the recorder the instant the take began -- and it used up its staging
+                # row, so the scene would never have been recorded. Such a take is cleared and
+                # the same row is recorded again, exactly as a re-record is.
+                _task_cfg = self.get_task_parameters(self.selected_task) or {}
+                _min_s = float(_task_cfg.get("min_episode_length_s", MIN_EPISODE_LENGTH_S))
+                _frames = int((getattr(dataset, "episode_buffer", None) or {}).get("size", 0) or 0)
+                if _frames < _min_s * cfg.fps:
+                    logger.warning(f"Episode {episode_idx} was {_frames} frames; not saved")
+                    self.log_signal.emit(
+                        colored(f"Episode {episode_idx} lasted {_frames} frames "
+                                f"({_frames / cfg.fps:.1f}s, under {_min_s:.0f}s) -- NOT saved. "
+                                "Recording the same row again.", "red"),
+                        True,
+                    )
+                    self.events["exit_early"] = False
+                    dataset.clear_episode_buffer()
+                    if self.events["stop_recording"]:
+                        break
+                    continue
 
                 dataset.add_episode_to_batch()
 
