@@ -1807,13 +1807,16 @@ class MainWindow(QMainWindow):
         """
         if "{object}" not in template:
             return None
-        prefix, suffix = template.split("{object}", 1)
-        if not instruction.startswith(prefix) or not instruction.endswith(suffix):
-            return None
-        end = len(instruction) - len(suffix) if suffix else len(instruction)
-        if end < len(prefix):
-            return None
-        return instruction[len(prefix) : end]
+        # Matched as a pattern rather than as a fixed prefix and suffix: a two-object template
+        # has {object2} inside what would be the suffix, and a literal suffix containing the
+        # placeholder matches no recorded sentence -- every pick_two episode went uncounted.
+        import re as _re
+        parts = _re.split(r"(\{object2?\})", template)
+        pattern = "".join(
+            "(?P<first>.+?)" if part == "{object}" else ".+?" if part == "{object2}"
+            else _re.escape(part) for part in parts)
+        m = _re.fullmatch(pattern, instruction)
+        return m.group("first") if m else None
 
     def refresh_episode_object_choices(self) -> None:
         """
@@ -1922,7 +1925,18 @@ class MainWindow(QMainWindow):
         template = task_config.get("task_description", "No task definition was provided")
         obj = self.ui.comboBox_episode_object.currentText().strip()
         if "{object}" in template:
-            return template.replace("{object}", obj)
+            template = template.replace("{object}", obj)
+        # The second object of a two-object task comes from the staging row, not the combobox:
+        # there is one combobox, and it names the first. Nothing read {object2} at all until
+        # this, so every pick_two episode would have been saved with the placeholder written
+        # into its instruction -- a language label that names no object.
+        if "{object2}" in template:
+            row = (self.staging_rows[self.staging_idx]
+                   if getattr(self, "staging_rows", None)
+                   and self.staging_idx < len(self.staging_rows) else {})
+            second = (row.get("object2") or "").strip()
+            if second:
+                template = template.replace("{object2}", second)
         return template
 
     def update_instruction_preview(self) -> None:
@@ -2974,12 +2988,24 @@ class MainWindow(QMainWindow):
             self.set_logs("staging sheet finished -- every cell has been recorded", clear=False)
             return
         r = self.staging_rows[self.staging_idx]
+        # For a two-object task the second object is one of the items listed as on the mat, and
+        # listing it among the distractors leaves the operator to guess which of two props is
+        # picked second and which must not be touched. Named apart, they cannot be swapped.
+        second = (r.get("object2") or "").strip()
+        props = [x.strip() for x in (r.get("distractors") or "").split(";") if x.strip()]
+        if second:
+            mine = [x for x in props if x.split("@")[0].strip() == second]
+            rest = [x for x in props if x not in mine]
+            place = mine[0].split("@")[1] if mine and "@" in mine[0] else "?"
+            middle = (f"THEN {second} in {place}  |  "
+                      f"do NOT touch: {'; '.join(rest) or '-'}  |  ")
+        else:
+            middle = f"also on the mat: {r.get('distractors', '-')}  |  "
         self.set_logs(
             f"[{self.staging_idx + 1}/{len(self.staging_rows)}]  "
             f"TARGET {r.get('variant', '?')} in zone {r.get('object_zone', '?')}  |  "
-            f"BOWL in {r.get('container_zone', '?')}  |  "
-            f"also on the mat: {r.get('distractors', '-')}  |  "
-            f"lighting {r.get('lighting', '-')}  |  start {r.get('start_nudge', '-')}",
+            + middle +
+            f"BOWL in {r.get('container_zone', '?')}  |  start {r.get('start_nudge', '-')}",
             clear=False)
 
     def log_staged_episode(self, episode_idx, instruction: str = "") -> None:
@@ -3804,6 +3830,18 @@ class MainWindow(QMainWindow):
                 # red block" for a row asking for a blue block, and nothing downstream could
                 # tell that from a demonstration of ignoring the instruction.
                 episode_instruction = self.get_current_instruction()
+                # A placeholder still in the sentence means a slot nothing filled -- no staging
+                # sheet loaded for a two-object task, or a row without a second object. Recording
+                # it would store a demonstration under an instruction that names nothing, and
+                # that is indistinguishable downstream from a policy ignoring its instruction.
+                if "{" in episode_instruction and "}" in episode_instruction:
+                    self.log_signal.emit(
+                        colored("NOT RECORDING -- the instruction still has an unfilled slot: "
+                                f"{episode_instruction!r}. Load the staging sheet for this task "
+                                "(Ctrl+N) and start again.", "red"), False)
+                    logger.error("refusing to record with unfilled instruction %r",
+                                 episode_instruction)
+                    break
                 self.log_signal.emit(
                     colored(f"recording: {episode_instruction}", "yellow"), False)
 
